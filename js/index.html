@@ -1,0 +1,1282 @@
+<!DOCTYPE html>
+<!-- The doctype is not decoration: without it Safari renders in quirks
+     mode, where the CSS box model changes and this layout comes apart. -->
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shavar — SHA-256 as a two-dimensional recurrence</title>
+
+<!--
+  shavar/js/index.html — an interactive step-debugger for the SHA-256
+  compression function, written as the two coupled order-4 recurrences of
+  ../spec/SPEC.md §3.
+
+  Open it straight off disk: no server, no build step, no network. It loads
+  exactly one file, shavar.js, from the same directory, and everything else
+  — layout, the SVG wiring diagram, the difference chart — is hand-written
+  here. There are no libraries and no CDN references by design; the whole
+  repository is built under that constraint.
+
+  THE VISUAL GRAMMAR (kept deliberately rigid, so nothing means two things):
+
+    HUE = IDENTITY. Which quantity is this?
+        aqua    the A track          violet  the E track
+        orange  the message schedule W
+        neutral grey  everything else (K, the sigmas, Ch, Maj, T1, T2) —
+                intermediates do not get a hue of their own, so that a hue
+                on screen always names one of the three named sequences.
+        red     a nonzero difference between message A and message B.
+                Used only in difference mode, and never as a series colour.
+
+    BRIGHTNESS + OUTLINE = STATE. What is this cell's role right now?
+        white outline, raised surface   the current round t
+        faint outline                   feeds the current round (a lookback
+                                        source, or a schedule feeder)
+        white underline on a bit        that bit changed since the previous
+                                        element of the same track
+        dimmed                          outside the selected round count
+
+    ARROWS ALWAYS MEAN DATAFLOW, and an arrow is coloured by the track its
+    data comes FROM. There is no second kind of arrow anywhere on the page.
+-->
+
+<style>
+/* ------------------------------------------------------------------ *
+ * Palette. The three identity hues were checked for colour-vision
+ * separation against this dark surface before being used, rather than
+ * chosen by eye; the neutral/state channel carries the rest of the
+ * meaning so that hue never has to work harder than "which quantity".
+ * ------------------------------------------------------------------ */
+:root {
+  color-scheme: dark;
+  --bg:        #101318;
+  --surface:   #171b22;
+  --surface-2: #1e232c;
+  --surface-3: #262d38;
+  --line:      #2b323d;
+  --ink:       #e8ecf2;
+  --ink-2:     #9aa4b2;
+  --ink-3:     #6b7684;
+
+  --a:    #199e70;   /* identity: the A track */
+  --e:    #9085e9;   /* identity: the E track */
+  --w:    #d95926;   /* identity: the message schedule */
+  --neut: #8d97a6;   /* identity: intermediates (K, sigmas, Ch, Maj, T1, T2) */
+  --diff: #d03b3b;   /* a nonzero difference between message A and B */
+  --now:  #ffffff;   /* state: the current round */
+
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, "Courier New", monospace;
+  --cell-w: 68px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 0 4rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+}
+
+header {
+  padding: 1.4rem 1.5rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #161b24, var(--bg));
+}
+h1 { margin: 0 0 .25rem; font-size: 1.35rem; letter-spacing: .01em; }
+h1 .sub { color: var(--ink-2); font-weight: 400; font-size: .95rem; }
+header p { margin: .45rem 0 0; color: var(--ink-2); max-width: 78ch; font-size: .9rem; }
+
+main { padding: 1.1rem 1.5rem 0; display: grid; gap: 1.1rem; }
+
+section {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem 1.1rem 1.15rem;
+}
+section > h2 {
+  margin: 0 0 .2rem;
+  font-size: .93rem;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.hint { margin: 0 0 .85rem; color: var(--ink-3); font-size: .84rem; max-width: 92ch; }
+.hint code { color: var(--ink-2); }
+
+/* ---- self-test badge --------------------------------------------- */
+#selftest {
+  display: inline-flex; align-items: center; gap: .55rem;
+  margin-top: .8rem; padding: .38rem .7rem;
+  border-radius: 999px; border: 1px solid var(--line);
+  background: var(--surface-2);
+  font: 600 .83rem/1 var(--mono);
+}
+#selftest .dot { width: .6rem; height: .6rem; border-radius: 50%; background: var(--ink-3); }
+#selftest.pass .dot { background: var(--a); }
+#selftest.fail .dot { background: var(--diff); }
+#selftest.fail { border-color: var(--diff); }
+#selftest-detail {
+  margin: .6rem 0 0; padding: 0; list-style: none;
+  font: .8rem/1.5 var(--mono); color: var(--diff);
+}
+
+/* ---- forms -------------------------------------------------------- */
+.grid { display: grid; gap: .85rem 1.2rem; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.field { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+.field > label { font-size: .78rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); }
+input[type=text], input[type=number], select {
+  width: 100%; padding: .42rem .55rem;
+  background: var(--bg); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 6px;
+  font: 13px/1.4 var(--mono);
+}
+input:focus, select:focus, button:focus { outline: 2px solid var(--e); outline-offset: 1px; }
+input[disabled] { color: var(--ink-3); background: #0c0f13; }
+.radios { display: flex; gap: .8rem; align-items: center; font: 13px/1 var(--mono); color: var(--ink-2); }
+.radios label { display: inline-flex; align-items: center; gap: .3rem; cursor: pointer; }
+
+button {
+  padding: .4rem .7rem; border-radius: 6px; cursor: pointer;
+  background: var(--surface-3); color: var(--ink);
+  border: 1px solid var(--line); font: 600 12.5px/1.2 var(--mono);
+}
+button:hover:not([disabled]) { background: #303948; }
+button[disabled] { opacity: .4; cursor: default; }
+button.on { background: var(--e); border-color: var(--e); color: #0f1116; }
+
+.err {
+  margin: .8rem 0 0; padding: .5rem .7rem; border-radius: 6px;
+  background: rgba(208,59,59,.12); border: 1px solid var(--diff);
+  color: #ffb4b4; font: 12.5px/1.5 var(--mono); white-space: pre-wrap;
+}
+.err:empty { display: none; }
+
+/* ---- digest readout ----------------------------------------------- */
+.digest { margin-top: .9rem; display: grid; gap: .45rem; }
+.digest-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: .55rem; }
+.digest-row .tag { font: 600 .74rem/1 var(--mono); letter-spacing: .08em; color: var(--ink-3); text-transform: uppercase; }
+.digest-row output { font: 13px/1.5 var(--mono); word-break: break-all; }
+.digest-row .hi { color: var(--diff); }
+
+/* ---- transport ----------------------------------------------------- */
+#transport { position: sticky; top: 0; z-index: 30; }
+.transport-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; }
+.transport-bar .spacer { flex: 1 1 1rem; }
+.roundtag {
+  font: 700 1.05rem/1 var(--mono); padding: .35rem .6rem;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--bg);
+  min-width: 6.4rem; text-align: center;
+}
+input[type=range] { accent-color: var(--e); width: 100%; }
+#tslider { margin-top: .7rem; }
+.ticks { display: flex; justify-content: space-between; font: .72rem/1 var(--mono); color: var(--ink-3); margin-top: .2rem; }
+
+/* ---- the two tracks ------------------------------------------------ */
+#trackscroll { overflow-x: auto; overflow-y: hidden; padding-bottom: .3rem; }
+#trackinner { position: relative; width: max-content; padding: 34px 0; }
+#wires { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.trackrow { display: flex; position: relative; z-index: 2; }
+.band { height: 58px; }
+
+.cell {
+  width: var(--cell-w); margin-right: 3px; padding: 3px 2px 4px;
+  border: 1px solid var(--line); border-radius: 5px;
+  background: var(--surface-2); cursor: pointer;
+  font: 10.5px/1.3 var(--mono); text-align: center; color: var(--ink-2);
+  transition: background .08s linear;
+}
+.cell:hover { background: var(--surface-3); }
+.cell .t { font-size: 9.5px; color: var(--ink-3); }
+.cell .v { color: var(--ink); letter-spacing: -.02em; }
+.cell .pc { height: 3px; margin-top: 3px; border-radius: 2px; background: #0c0f13; }
+.cell .pc i { display: block; height: 100%; border-radius: 2px; }
+.row-a .cell .pc i { background: var(--a); }
+.row-e .cell .pc i { background: var(--e); }
+.cell.is-src { border-color: rgba(255,255,255,.42); background: var(--surface-3); }
+.cell.is-now { border: 2px solid var(--now); background: #333c4a; padding: 2px 1px 3px; }
+.cell.off { opacity: .28; }
+.cell.dif .v { color: var(--diff); }
+
+.rowlabel {
+  position: absolute; left: 0; top: -20px;
+  font: 700 11px/1 var(--mono); letter-spacing: .1em;
+}
+.lab-a { color: var(--a); }
+.lab-e { color: var(--e); }
+
+.callout {
+  margin-top: .8rem; padding: .55rem .7rem; border-radius: 6px;
+  background: var(--surface-2); border-left: 3px solid var(--a);
+  font: 12.5px/1.6 var(--mono); color: var(--ink-2);
+}
+.callout b { color: var(--ink); font-weight: 600; }
+
+/* ---- legend -------------------------------------------------------- */
+.legend { display: flex; flex-wrap: wrap; gap: .35rem 1.1rem; margin-top: .85rem;
+          font: 11.5px/1.5 var(--mono); color: var(--ink-3); }
+.legend span { display: inline-flex; align-items: center; gap: .35rem; }
+.legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.legend i.sw-a { background: var(--a); } .legend i.sw-e { background: var(--e); }
+.legend i.sw-w { background: var(--w); } .legend i.sw-d { background: var(--diff); }
+.legend i.sw-now { background: #333c4a; border: 2px solid var(--now); }
+.legend i.sw-src { background: var(--surface-3); border: 1px solid rgba(255,255,255,.42); }
+.legend i.sw-chg { background: transparent; border-bottom: 3px solid var(--now); border-radius: 0; height: 8px; }
+
+/* ---- bit rows ------------------------------------------------------ */
+.bitgrid { display: grid; gap: .1rem 1.6rem; grid-template-columns: repeat(auto-fit, minmax(530px, 1fr)); }
+@media (max-width: 620px) { .bitgrid { grid-template-columns: 1fr; } }
+.grouphead {
+  grid-column: 1 / -1;
+  margin: .75rem 0 .3rem; padding-bottom: .25rem;
+  border-bottom: 1px solid var(--line);
+  font: 600 .76rem/1.4 var(--mono); letter-spacing: .09em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.bitrow { display: flex; align-items: center; gap: .5rem; padding: 1px 0; min-width: 0; }
+.bitrow .name { width: 116px; flex: none; text-align: right; font: 12px/1.4 var(--mono); color: var(--ink-2); }
+.bitrow.na { opacity: .3; }
+.bits { display: flex; gap: 1px; flex: none; }
+.bits .gap8 { width: 4px; flex: none; }
+.bit {
+  width: 11px; height: 15px; border-radius: 2px;
+  background: #0d1015; border-bottom: 3px solid transparent;
+  cursor: pointer;
+}
+.bit.one { background: var(--neut); }
+.r-a .bit.one { background: var(--a); }
+.r-e .bit.one { background: var(--e); }
+.r-w .bit.one { background: var(--w); }
+.bit.chg { border-bottom-color: var(--now); }
+.bit.dif { background: var(--diff); }
+.bit.col-sel { outline: 1px solid var(--now); outline-offset: 0; }
+.bitrow .hex { font: 12px/1.4 var(--mono); color: var(--ink); flex: none; width: 8ch; }
+.bitrow .pop { font: 11px/1.4 var(--mono); color: var(--ink-3); flex: none; width: 5ch; }
+
+/* ---- schedule ------------------------------------------------------- */
+.sched { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 3px; }
+.wcell {
+  padding: 3px 4px; border: 1px solid var(--line); border-radius: 5px;
+  background: var(--surface-2); font: 10.5px/1.35 var(--mono); text-align: center;
+  color: var(--ink-2); cursor: pointer;
+}
+.wcell:hover { background: var(--surface-3); }
+.wcell .t { font-size: 9.5px; color: var(--ink-3); }
+.wcell .v { color: var(--ink); }
+.wcell.is-src { border-color: rgba(255,255,255,.42); background: var(--surface-3); }
+.wcell.is-now { border: 2px solid var(--now); background: #333c4a; padding: 2px 3px; }
+.wcell.seed { border-left: 3px solid var(--w); }
+.wcell.dif .v { color: var(--diff); }
+
+/* ---- difference chart ------------------------------------------------ */
+#chartwrap { position: relative; margin-top: .3rem; }
+#chart { width: 100%; height: auto; display: block; }
+#chart .grid-line { stroke: var(--line); stroke-width: 1; }
+#chart .axis-text { fill: var(--ink-3); font: 10px var(--mono); }
+#chart .serie { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+#chart .nowline { stroke: var(--now); stroke-width: 1; stroke-dasharray: 2 3; opacity: .85; }
+#chart .endlab { font: 600 10px var(--mono); }
+#tooltip {
+  position: absolute; pointer-events: none; opacity: 0;
+  background: #0b0e13; border: 1px solid var(--line); border-radius: 6px;
+  padding: .4rem .55rem; font: 11.5px/1.5 var(--mono); white-space: pre;
+  transform: translate(-50%, -115%); transition: opacity .08s;
+}
+.chartlegend { display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; font: 11.5px/1.5 var(--mono); color: var(--ink-2); }
+.chartlegend span { display: inline-flex; align-items: center; gap: .35rem; }
+.chartlegend i { width: 14px; height: 3px; border-radius: 2px; }
+
+details { margin-top: .9rem; }
+summary { cursor: pointer; color: var(--ink-2); font: 12.5px/1.6 var(--mono); }
+details pre {
+  max-height: 340px; overflow: auto; margin: .5rem 0 0; padding: .6rem .7rem;
+  background: #0b0e13; border: 1px solid var(--line); border-radius: 6px;
+  font: 11.5px/1.45 var(--mono); color: var(--ink-2);
+}
+.hidden { display: none !important; }
+kbd {
+  background: var(--surface-3); border: 1px solid var(--line); border-bottom-width: 2px;
+  border-radius: 4px; padding: 0 .3rem; font: 11px/1.5 var(--mono);
+}
+</style>
+
+<header>
+  <h1>shavar <span class="sub">— SHA-256 as two coupled order-4 recurrences</span></h1>
+  <p>
+    The standard describes the compression function as eight registers that shuffle every
+    round. Six of those eight assignments are pure copies. Drop them and what remains is two
+    sequences, <b>A</b> and <b>E</b>, each looking back four steps — the form in
+    <code>spec/SPEC.md §3</code>, and the thing this page lets you step through one round at a
+    time. Everything runs locally in Safari; nothing is sent anywhere.
+  </p>
+  <div id="selftest"><span class="dot"></span><span id="selftest-text">running self-test…</span></div>
+  <ul id="selftest-detail"></ul>
+</header>
+
+<main>
+
+  <!-- ============================ INPUT ============================ -->
+  <section id="setup">
+    <h2>Message and parameters</h2>
+    <p class="hint">
+      A message is a byte buffer plus a bit count. When the bit count is not a multiple of 8,
+      the final byte carries its significant bits in the <em>high</em> positions and its low
+      bits must be zero — nonzero low bits are rejected, never silently masked, because masking
+      would map two different inputs to one digest (<code>SPEC.md §5.1</code>).
+    </p>
+
+    <div class="grid">
+      <div class="field">
+        <label for="inA">Message A</label>
+        <div class="radios">
+          <label><input type="radio" name="modeA" value="text"> text</label>
+          <label><input type="radio" name="modeA" value="hex" checked> hex</label>
+        </div>
+        <input type="text" id="inA" value="616263" spellcheck="false" autocapitalize="off" autocorrect="off">
+      </div>
+      <div class="field">
+        <label for="bitsA">Bit length of A</label>
+        <input type="number" id="bitsA" value="24" min="0" step="1">
+        <button type="button" id="fixA">zero the stray low bits</button>
+      </div>
+      <div class="field">
+        <label for="rounds">Rounds (1–64)</label>
+        <input type="number" id="rounds" value="64" min="1" max="64" step="1">
+        <div class="hint" style="margin:0">Fewer than 64 is not SHA-256; it is the reduced-round variant used for cryptanalysis.</div>
+      </div>
+      <div class="field">
+        <label for="blockidx">Block of the padded message</label>
+        <select id="blockidx"></select>
+      </div>
+      <div class="field" style="grid-column: 1 / -1">
+        <label for="iv">Initial chaining value — 8 words, free-start (SPEC.md §6)</label>
+        <input type="text" id="iv" spellcheck="false" autocapitalize="off" autocorrect="off">
+        <div class="radios"><button type="button" id="ivreset">restore the FIPS IV</button></div>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:1rem">
+      <div class="field" style="grid-column: 1 / -1">
+        <div class="radios">
+          <button type="button" id="toggleB">difference mode: off</button>
+          <span style="color:var(--ink-3)">compare two messages round by round (SPEC.md §7.3)</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid hidden" id="bwrap" style="margin-top:.6rem">
+      <div class="field">
+        <label for="inB">Message B</label>
+        <div class="radios">
+          <label><input type="radio" name="modeB" value="text"> text</label>
+          <label><input type="radio" name="modeB" value="hex" checked> hex</label>
+        </div>
+        <input type="text" id="inB" value="616273" spellcheck="false" autocapitalize="off" autocorrect="off">
+      </div>
+      <div class="field">
+        <label for="bitsB">Bit length of B</label>
+        <input type="number" id="bitsB" value="24" min="0" step="1">
+      </div>
+    </div>
+
+    <div class="err" id="err"></div>
+
+    <div class="digest">
+      <div class="digest-row"><span class="tag">digest A</span><output id="digA"></output></div>
+      <div class="digest-row hidden" id="digBrow"><span class="tag">digest B</span><output id="digB"></output></div>
+      <div class="digest-row hidden" id="digDrow"><span class="tag">A xor B</span><output id="digD" class="hi"></output></div>
+    </div>
+  </section>
+
+  <!-- ========================== TRANSPORT ========================== -->
+  <section id="transport">
+    <h2>Round</h2>
+    <div class="transport-bar">
+      <button type="button" id="btnFirst" title="jump to t = -4">|&lt;</button>
+      <button type="button" id="btnPrev" title="step back one round">&lt; step</button>
+      <button type="button" id="btnPlay" title="run / pause">&#9654; run</button>
+      <button type="button" id="btnNext" title="step forward one round">step &gt;</button>
+      <button type="button" id="btnLast" title="jump to the last round">&gt;|</button>
+      <span class="roundtag" id="roundtag">t = 0</span>
+      <span class="spacer"></span>
+      <label style="color:var(--ink-3);font:12px var(--mono)">speed
+        <input type="range" id="speed" min="1" max="30" value="8" style="width:110px;vertical-align:middle">
+      </label>
+      <span style="color:var(--ink-3);font:11.5px var(--mono)">
+        <kbd>&larr;</kbd> <kbd>&rarr;</kbd> step &nbsp; <kbd>space</kbd> run &nbsp; <kbd>home</kbd> <kbd>end</kbd>
+      </span>
+    </div>
+    <input type="range" id="tslider" min="-4" max="63" value="0" step="1">
+    <div class="ticks"><span>t = -4 (seeds)</span><span>t = 15</span><span>t = 31</span><span>t = 47</span><span id="tickEnd">t = 63</span></div>
+  </section>
+
+  <!-- ============================ TRACKS ============================ -->
+  <section id="tracks">
+    <h2>The two tracks</h2>
+    <p class="hint">
+      Each cell is one 32-bit word: the top row is <b>A[-4 … 63]</b>, the bottom row
+      <b>E[-4 … 63]</b>. The four cells to the left of the current round are its lookback
+      window. Arrows show dataflow into round t and are coloured by the track the data comes
+      <em>from</em>. The bar under each value is that word's population count out of 32.
+    </p>
+
+    <div id="trackscroll">
+      <div id="trackinner">
+        <svg id="wires" aria-hidden="true">
+          <defs>
+            <marker id="ah-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L8,4 L0,8 z" fill="#199e70"></path>
+            </marker>
+            <marker id="ah-e" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L8,4 L0,8 z" fill="#9085e9"></path>
+            </marker>
+          </defs>
+          <g id="wirepaths"></g>
+        </svg>
+        <div class="trackrow row-a" id="rowA"><span class="rowlabel lab-a">A TRACK</span></div>
+        <div class="band"></div>
+        <div class="trackrow row-e" id="rowE"><span class="rowlabel lab-e">E TRACK</span></div>
+      </div>
+    </div>
+
+    <div class="callout" id="soleedge"></div>
+
+    <div class="legend">
+      <span><i class="sw-a"></i>A track</span>
+      <span><i class="sw-e"></i>E track</span>
+      <span><i class="sw-w"></i>schedule W</span>
+      <span><i class="sw-now"></i>current round t</span>
+      <span><i class="sw-src"></i>feeds round t</span>
+      <span><i class="sw-chg"></i>bit changed since the previous round</span>
+      <span><i class="sw-d"></i>differs between A and B</span>
+    </div>
+  </section>
+
+  <!-- ========================== ROUND DETAIL ======================== -->
+  <section id="detail">
+    <h2>Inside round <span id="detailT">0</span> — every word, bit by bit</h2>
+    <p class="hint">
+      Bit 31 (most significant) is on the left. Click any bit column to track that position
+      down the whole round; click again to release it. Only carries in <code>&#8862;</code>
+      move information between bit positions — every other operation here acts on each of the
+      32 positions independently (<code>SPEC.md §7.2</code>).
+      <span id="pinnote"></span>
+    </p>
+    <div class="bitgrid" id="bitgrid"></div>
+  </section>
+
+  <!-- ============================ SCHEDULE ========================== -->
+  <section id="schedule">
+    <h2>Message schedule</h2>
+    <p class="hint">
+      W[0…15] are the block's own words; after that
+      <code>W[t] = &sigma;1(W[t-2]) &#8862; W[t-7] &#8862; &sigma;0(W[t-15]) &#8862; W[t-16]</code>.
+      The four cells feeding the selected round are outlined. This recurrence is GF(2)-linear
+      apart from its three additions, which is what message-modification attacks exploit
+      (<code>SPEC.md §4</code>).
+    </p>
+    <div class="sched" id="sched"></div>
+  </section>
+
+  <!-- =========================== DIFFERENCE ========================= -->
+  <section id="diffpanel" class="hidden">
+    <h2>Difference between message A and message B</h2>
+    <p class="hint">
+      &Delta;X[t] = X[t] &oplus; X&prime;[t]. The chart is the Hamming weight of each difference
+      across the rounds — the standard first diagnostic for whether a differential path is
+      behaving. A single flipped input bit should saturate near 16 of 32 within a dozen rounds;
+      watching where it does not is the interesting part (<code>SPEC.md §7.3</code>).
+      Click the chart to jump to a round.
+    </p>
+    <div class="chartlegend" style="margin-bottom:.5rem">
+      <span><i style="background:var(--a)"></i>&Delta;A weight</span>
+      <span><i style="background:var(--e)"></i>&Delta;E weight</span>
+      <span><i style="background:var(--w)"></i>&Delta;W weight</span>
+    </div>
+    <div id="chartwrap">
+      <svg id="chart" viewBox="0 0 700 220" role="img" aria-label="Hamming weight of the A, E and W differences per round"></svg>
+      <div id="tooltip"></div>
+    </div>
+    <p class="hint" style="text-align:center;margin:.2rem 0 0">round t &rarr;</p>
+    <div class="bitgrid" id="diffbits" style="margin-top:1rem"></div>
+  </section>
+
+  <!-- ============================== TRACE =========================== -->
+  <section id="raw">
+    <h2>Raw trace</h2>
+    <p class="hint">
+      The same block in the exact tab-separated form <code>spec/CLI.md</code> fixes, i.e. byte
+      for byte what <code>./shavar-cli.js trace …</code> prints. The cross-testing harness diffs
+      this across all seven implementations.
+    </p>
+    <details>
+      <summary>show the CLI-format trace</summary>
+      <pre id="rawtrace"></pre>
+    </details>
+  </section>
+
+</main>
+
+<script src="shavar.js"></script>
+<script>
+/* =====================================================================
+ * Page logic. Kept strictly separate from shavar.js: this file computes
+ * nothing cryptographic of its own, it only reads what SHAVAR produces.
+ * If a value appears on screen, it came out of the implementation — the
+ * page has no second, subtly different copy of the algorithm to drift
+ * away from it.
+ * ===================================================================== */
+(function (root) {
+  "use strict";
+
+  var S = root.SHAVAR;
+
+  /* ---- tiny DOM helpers -------------------------------------------- */
+  const $ = (id) => document.getElementById(id);
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+  /* Assigning className unconditionally on every one of the ~1200 cells,
+   * 30 times a second while running, is enough to be felt. Comparing
+   * first turns almost all of those writes into no-ops. */
+  function setCls(node, cls) { if (node.className !== cls) node.className = cls; }
+  function setTxt(node, s) { if (node.textContent !== s) node.textContent = s; }
+
+  const hex8 = S.hex8;
+  /** Population count of a 32-bit word. The `>>> 0` keeps every
+   *  intermediate unsigned; with `>>` the top bit would sign-extend and
+   *  the loop would never terminate. */
+  function popcount(x) {
+    let n = 0;
+    for (let v = x >>> 0; v; v = (v >>> 1)) n += v & 1;
+    return n;
+  }
+
+  /* ---- state -------------------------------------------------------- */
+  const st = {
+    t: 0,
+    rounds: 64,
+    block: 0,
+    useB: false,
+    playing: false,
+    timer: null,
+    pinnedBit: -1,
+    trA: null, trB: null,
+    msgA: null, nbitsA: 0,
+    msgB: null, nbitsB: 0,
+    iv: Array.from(S.IV),
+    nblocks: 1,
+  };
+
+  /* =====================================================================
+   * Self-test — run on load, before the user trusts anything on screen.
+   * Deferred by one turn of the event loop so the page paints first; the
+   * million-'a' vector alone is most of the ~80 ms.
+   * =================================================================== */
+  function runSelftest() {
+    const badge = $("selftest"), text = $("selftest-text"), list = $("selftest-detail");
+    let r;
+    try {
+      r = S.selftest();
+    } catch (e) {
+      badge.className = "fail";
+      text.textContent = `self-test could not run: ${e.message}`;
+      return;
+    }
+    if (r.failures.length === 0) {
+      badge.className = "pass";
+      text.textContent = `self-test passed — ${r.passed}/${r.total} known-answer vectors`;
+    } else {
+      badge.className = "fail";
+      text.textContent = `SELF-TEST FAILED — ${r.failures.length} of ${r.total} vectors`;
+      for (const f of r.failures) {
+        list.appendChild(el("li", null, `FAIL ${f.name}: expected ${f.expect}, got ${f.actual}`));
+      }
+    }
+  }
+
+  /* =====================================================================
+   * Reading the form
+   * =================================================================== */
+  function radioValue(name) {
+    const nodes = document.getElementsByName(name);
+    for (const n of nodes) if (n.checked) return n.value;
+    return "hex";
+  }
+
+  /** Turn one message's controls into {bytes, nbits}, or throw. */
+  function readMessage(which) {
+    const mode = radioValue("mode" + which);
+    const raw = $("in" + which).value;
+    const bitsField = $("bits" + which);
+
+    if (mode === "text") {
+      const bytes = S.utf8Bytes(raw);
+      bitsField.value = String(bytes.length * 8);
+      bitsField.disabled = true;
+      return { bytes, nbits: bytes.length * 8 };
+    }
+    bitsField.disabled = false;
+
+    const hex = raw.replace(/[\s_]/g, "");
+    const nbits = Number(bitsField.value);
+    if (!Number.isSafeInteger(nbits) || nbits < 0) {
+      throw new Error(`message ${which}: the bit length must be a non-negative integer`);
+    }
+    const bytes = (hex === "" || hex === "-") ? new Uint8Array(0) : S.hexToBytes(hex);
+    const need = Math.ceil(nbits / 8);
+    if (bytes.length !== need) {
+      throw new Error(
+        `message ${which}: a bit length of ${nbits} needs ceil(${nbits}/8) = ${need} byte(s), ` +
+        `but ${bytes.length} were given (${bytes.length * 8} bits of hex). ` +
+        `Either edit the hex or set the bit length to ${bytes.length * 8}.`);
+    }
+    S.checkTrailingBits(bytes, nbits);   // throws with a precise message
+    return { bytes, nbits };
+  }
+
+  function readIV() {
+    const words = $("iv").value.trim().split(/[\s,]+/).filter((s) => s.length);
+    if (words.length !== 8) throw new Error("the IV needs exactly 8 words of 8 hex digits");
+    return words.map((word, i) => {
+      if (!/^[0-9a-fA-F]{1,8}$/.test(word)) {
+        throw new Error(`IV word ${i} is not 1–8 hex digits: "${word}"`);
+      }
+      return parseInt(word, 16) >>> 0;
+    });
+  }
+
+  /* =====================================================================
+   * Recompute everything from the form. Cheap enough (~10 µs a trace) to
+   * do on every keystroke rather than behind a button.
+   * =================================================================== */
+  function recompute() {
+    const errBox = $("err");
+    try {
+      const a = readMessage("A");
+      st.msgA = a.bytes; st.nbitsA = a.nbits;
+
+      st.rounds = Math.min(64, Math.max(1, Math.floor(Number($("rounds").value) || 64)));
+      $("rounds").value = String(st.rounds);
+      st.iv = readIV();
+
+      st.nblocks = S.paddedBlocks(st.nbitsA);
+      syncBlockOptions();
+      st.block = Math.min(st.block, st.nblocks - 1);
+
+      const opts = { iv: Uint32Array.from(st.iv), rounds: st.rounds };
+      st.trA = S.traceBlock(st.msgA, st.nbitsA, st.block, opts);
+      $("digA").textContent = S.hashHex(st.msgA, st.nbitsA, opts);
+
+      /* Cleared first: if message B turns out to be malformed we fall into
+       * the catch below, and a stale B trace left in place would keep
+       * drawing a difference that no longer corresponds to the form. */
+      st.trB = null;
+      st.useB = $("toggleB").classList.contains("on");
+      if (st.useB) {
+        const b = readMessage("B");
+        st.msgB = b.bytes; st.nbitsB = b.nbits;
+        const nbB = S.paddedBlocks(st.nbitsB);
+        if (st.block >= nbB) {
+          throw new Error(
+            `message B's padded form has only ${nbB} block(s), so block ${st.block} ` +
+            `cannot be compared; pick a lower block index or a longer message B`);
+        }
+        st.trB = S.traceBlock(st.msgB, st.nbitsB, st.block, opts);
+        const dA = $("digA").textContent;
+        const dB = S.hashHex(st.msgB, st.nbitsB, opts);
+        $("digB").textContent = dB;
+        let xor = "", bits = 0;
+        for (let i = 0; i < 64; i += 2) {
+          const v = parseInt(dA.substr(i, 2), 16) ^ parseInt(dB.substr(i, 2), 16);
+          xor += v.toString(16).padStart(2, "0");
+          bits += popcount(v);
+        }
+        $("digD").textContent = `${xor}   (${bits} of 256 bits differ)`;
+      }
+
+      errBox.textContent = "";
+    } catch (e) {
+      errBox.textContent = e.message;
+      /* Keep the previous good trace on screen rather than blanking the
+       * page: a half-typed hex string should not destroy the view. */
+      if (!st.trA) return;
+    }
+
+    clampT();
+    render();
+  }
+
+  function syncBlockOptions() {
+    const sel = $("blockidx");
+    if (sel.options.length === st.nblocks && sel.dataset.n === String(st.nblocks)) return;
+    sel.textContent = "";
+    for (let i = 0; i < st.nblocks; i++) {
+      sel.appendChild(new Option(`block ${i} of ${st.nblocks}`, String(i)));
+    }
+    sel.dataset.n = String(st.nblocks);
+    sel.value = String(Math.min(st.block, st.nblocks - 1));
+  }
+
+  function clampT() {
+    if (st.t > st.rounds - 1) st.t = st.rounds - 1;
+    if (st.t < -4) st.t = -4;
+    const sl = $("tslider");
+    sl.max = String(st.rounds - 1);
+    sl.value = String(st.t);
+    $("tickEnd").textContent = `t = ${st.rounds - 1}`;
+  }
+
+  /* =====================================================================
+   * A view onto one trace at one round. Every accessor returns null when
+   * the index does not exist, and the renderers draw null as dashes — so
+   * t = -4 (the seeded window, before any round has run) renders sanely
+   * instead of throwing or, worse, showing zeros as if they were real.
+   * =================================================================== */
+  function view(tr, t) {
+    const R = tr.rounds;
+    const inA = (i) => (i >= -4 && i < R) ? tr.A[4 + i] : null;
+    const inE = (i) => (i >= -4 && i < R) ? tr.E[4 + i] : null;
+    const live = t >= 0 && t < R;
+    const e1 = inE(t - 1), e2 = inE(t - 2), e3 = inE(t - 3), e4 = inE(t - 4);
+    const a1 = inA(t - 1), a2 = inA(t - 2), a3 = inA(t - 3), a4 = inA(t - 4);
+    return {
+      t, live, A: inA, E: inE,
+      a1, a2, a3, a4, e1, e2, e3, e4,
+      /* Recomputed through SHAVAR's own exported round functions rather
+       * than stored, which is exactly the use SPEC.md §7.1 keeps them
+       * separately addressable for. */
+      Sig0: live ? S.Sigma0(a1) : null,
+      Maj: live ? S.maj(a1, a2, a3) : null,
+      Sig1: live ? S.Sigma1(e1) : null,
+      Ch: live ? S.ch(e1, e2, e3) : null,
+      K: live ? S.K[t] : null,
+      W: live ? tr.W[t] : null,
+      T1: live ? tr.T1[t] : null,
+      T2: live ? tr.T2[t] : null,
+      At: inA(t), Et: inE(t),
+    };
+  }
+
+  /* =====================================================================
+   * Static construction — built once, then only classes and text change.
+   * =================================================================== */
+  const trackCells = { A: [], E: [] };
+
+  function buildTracks() {
+    for (const track of ["A", "E"]) {
+      const row = $("row" + track);
+      for (let t = -4; t < 64; t++) {
+        const c = el("div", "cell");
+        c.appendChild(el("div", "t", String(t)));
+        c.appendChild(el("div", "v", "--------"));
+        const pc = el("div", "pc"); pc.appendChild(el("i")); c.appendChild(pc);
+        c.title = `${track}[${t}] — click to select round ${t}`;
+        c.addEventListener("click", () => { setT(t); });
+        row.appendChild(c);
+        trackCells[track].push(c);
+      }
+    }
+  }
+
+  /* The rows of the bit panel, in dataflow order: the A-side pipeline that
+   * produces T2, then the E-side pipeline that produces T1, then the two
+   * outputs. `track` selects the identity hue; "n" is the neutral used for
+   * every intermediate. */
+  const ROWS = [
+    { group: "A-track inputs → T2[t] = Σ0(A[t-1]) ⊞ Maj(A[t-1],A[t-2],A[t-3])" },
+    { name: "A[t-1]", track: "a", get: (v) => v.a1 },
+    { name: "A[t-2]", track: "a", get: (v) => v.a2 },
+    { name: "A[t-3]", track: "a", get: (v) => v.a3 },
+    { name: "Σ0(A[t-1])", track: "n", get: (v) => v.Sig0 },
+    { name: "Maj(…)", track: "n", get: (v) => v.Maj },
+    { name: "T2[t]", track: "n", get: (v) => v.T2 },
+
+    { group: "E-track inputs → T1[t] = E[t-4] ⊞ Σ1(E[t-1]) ⊞ Ch(…) ⊞ K[t] ⊞ W[t]" },
+    { name: "E[t-1]", track: "e", get: (v) => v.e1 },
+    { name: "E[t-2]", track: "e", get: (v) => v.e2 },
+    { name: "E[t-3]", track: "e", get: (v) => v.e3 },
+    { name: "E[t-4]", track: "e", get: (v) => v.e4 },
+    { name: "Σ1(E[t-1])", track: "n", get: (v) => v.Sig1 },
+    { name: "Ch(…)", track: "n", get: (v) => v.Ch },
+    { name: "K[t]", track: "n", get: (v) => v.K },
+    { name: "W[t]", track: "w", get: (v) => v.W },
+    { name: "T1[t]", track: "n", get: (v) => v.T1 },
+
+    { group: "Outputs — A[t] = T1 ⊞ T2, and E[t] = A[t-4] ⊞ T1" },
+    { name: "A[t-4]", track: "a", get: (v) => v.a4, note: "the sole A→E input" },
+    { name: "A[t]", track: "a", get: (v) => v.At, prev: (v) => v.a1 },
+    { name: "E[t]", track: "e", get: (v) => v.Et, prev: (v) => v.e1 },
+  ];
+
+  /** Build one 32-bit row; returns the handles the renderer updates. */
+  function buildBitRow(spec, container, onBitClick) {
+    const row = el("div", "bitrow r-" + spec.track);
+    row.appendChild(el("div", "name", spec.name));
+    const bits = el("div", "bits");
+    const cells = [];
+    for (let i = 0; i < 32; i++) {
+      if (i > 0 && i % 8 === 0) bits.appendChild(el("div", "gap8"));
+      const b = el("div", "bit");
+      b.title = `${spec.name} bit ${31 - i}`;
+      b.addEventListener("click", () => onBitClick(i));
+      bits.appendChild(b);
+      cells.push(b);
+    }
+    row.appendChild(bits);
+    row.appendChild(el("div", "hex", "--------"));
+    row.appendChild(el("div", "pop", ""));
+    container.appendChild(row);
+    return { spec, row, cells, hex: row.children[2], pop: row.children[3] };
+  }
+
+  let bitRows = [], diffRows = [];
+
+  function buildBits() {
+    const host = $("bitgrid"), dhost = $("diffbits");
+    const onBit = (i) => { st.pinnedBit = (st.pinnedBit === i) ? -1 : i; render(); };
+    for (const spec of ROWS) {
+      if (spec.group) {
+        host.appendChild(el("div", "grouphead", spec.group));
+        continue;
+      }
+      bitRows.push(buildBitRow(spec, host, onBit));
+    }
+    /* The difference panel repeats only the three sequences that a
+     * differential path is stated in terms of. */
+    dhost.appendChild(el("div", "grouphead", "Δ at the selected round — red is a set difference bit"));
+    for (const spec of [
+      { name: "ΔW[t]", track: "w", get: (v) => v.W },
+      { name: "ΔA[t]", track: "a", get: (v) => v.At },
+      { name: "ΔE[t]", track: "e", get: (v) => v.Et },
+    ]) {
+      diffRows.push(buildBitRow(spec, dhost, onBit));
+    }
+  }
+
+  const schedCells = [];
+  function buildSched() {
+    const host = $("sched");
+    for (let t = 0; t < 64; t++) {
+      const c = el("div", "wcell" + (t < 16 ? " seed" : ""));
+      c.appendChild(el("div", "t", "W" + t));
+      c.appendChild(el("div", "v", "--------"));
+      c.title = t < 16 ? `W[${t}] — straight from the message block` :
+        `W[${t}] = σ1(W[${t - 2}]) ⊞ W[${t - 7}] ⊞ σ0(W[${t - 15}]) ⊞ W[${t - 16}]`;
+      c.addEventListener("click", () => setT(t));
+      host.appendChild(c);
+      schedCells.push(c);
+    }
+  }
+
+  /* =====================================================================
+   * Rendering
+   * =================================================================== */
+  function renderBitRow(h, value, prevValue, diffValue) {
+    const na = (value === null || value === undefined);
+    setCls(h.row, "bitrow r-" + h.spec.track + (na ? " na" : ""));
+    const v = na ? 0 : value >>> 0;
+    const chg = (prevValue === null || prevValue === undefined) ? 0 : (v ^ (prevValue >>> 0)) >>> 0;
+    const dif = (diffValue === null || diffValue === undefined) ? 0 : diffValue >>> 0;
+
+    for (let i = 0; i < 32; i++) {
+      const mask = 1 << (31 - i);
+      let cls = "bit";
+      if (!na && (v & mask)) cls += " one";
+      if (dif & mask) cls += " dif";
+      if (chg & mask) cls += " chg";
+      if (st.pinnedBit === i) cls += " col-sel";
+      setCls(h.cells[i], cls);
+    }
+    setTxt(h.hex, na ? "--------" : hex8(v));
+    setTxt(h.pop, na ? "" : `/${popcount(v)}`);
+  }
+
+  function render() {
+    if (!st.trA) return;
+    const t = st.t;
+    const vA = view(st.trA, t);
+    const vB = st.trB ? view(st.trB, t) : null;
+
+    $("roundtag").textContent = `t = ${t}`;
+    $("detailT").textContent = String(t);
+    $("tslider").value = String(t);
+    $("pinnote").textContent = st.pinnedBit >= 0
+      ? ` Bit ${31 - st.pinnedBit} is pinned; click it again to release.` : "";
+
+    /* --- tracks --- */
+    const src = { A: {}, E: {} };
+    if (t >= 0) {
+      for (let d = 1; d <= 3; d++) src.A[t - d] = true;     // A[t-1..t-3] -> T2
+      src.A[t - 4] = true;                                  // A[t-4]      -> E[t]
+      for (let d = 1; d <= 4; d++) src.E[t - d] = true;     // E[t-1..t-4] -> T1
+    }
+    for (const track of ["A", "E"]) {
+      const cells = trackCells[track];
+      for (let i = 0; i < 68; i++) {
+        const tt = i - 4;
+        const c = cells[i];
+        const val = (tt < st.rounds) ? (track === "A" ? vA.A(tt) : vA.E(tt)) : null;
+        let cls = "cell";
+        if (val === null) cls += " off";
+        else if (tt === t) cls += " is-now";
+        else if (src[track][tt]) cls += " is-src";
+        if (vB && val !== null) {
+          const other = track === "A" ? vB.A(tt) : vB.E(tt);
+          if (other !== null && other !== val) cls += " dif";
+        }
+        setCls(c, cls);
+        setTxt(c.children[1], val === null ? "--------" : hex8(val));
+        c.children[2].firstChild.style.width = val === null ? "0%" : (popcount(val) / 32 * 100) + "%";
+      }
+    }
+    renderSoleEdge(vA);
+    drawWires();
+
+    /* --- bits --- */
+    for (const h of bitRows) {
+      const value = h.spec.get(vA);
+      const prev = h.spec.prev ? h.spec.prev(vA) : null;
+      const dv = vB ? xorOrNull(value, h.spec.get(vB)) : null;
+      renderBitRow(h, value, prev, dv);
+    }
+
+    /* --- schedule --- */
+    const feeders = {};
+    if (t >= 16) for (const d of [2, 7, 15, 16]) feeders[t - d] = true;
+    for (let i = 0; i < 64; i++) {
+      const val = st.trA.W[i];
+      let cls = "wcell" + (i < 16 ? " seed" : "");
+      if (i === t) cls += " is-now";
+      else if (feeders[i]) cls += " is-src";
+      if (vB && st.trB.W[i] !== val) cls += " dif";
+      setCls(schedCells[i], cls);
+      setTxt(schedCells[i].children[1], hex8(val));
+    }
+
+    /* --- difference panel --- */
+    $("diffpanel").classList.toggle("hidden", !vB);
+    $("digBrow").classList.toggle("hidden", !vB);
+    $("digDrow").classList.toggle("hidden", !vB);
+    if (vB) {
+      const specs = [
+        { h: diffRows[0], x: xorOrNull(vA.W, vB.W) },
+        { h: diffRows[1], x: xorOrNull(vA.At, vB.At) },
+        { h: diffRows[2], x: xorOrNull(vA.Et, vB.Et) },
+      ];
+      for (const s of specs) renderBitRow(s.h, s.x, null, s.x);
+      drawChart();
+    }
+
+    $("rawtrace").textContent = S.formatTrace(st.trA);
+  }
+
+  const xorOrNull = (x, y) =>
+    (x === null || x === undefined || y === null || y === undefined) ? null : ((x ^ y) >>> 0);
+
+  function renderSoleEdge(v) {
+    const box = $("soleedge");
+    if (!v.live) {
+      box.innerHTML = "<b>t = " + v.t + "</b> — the seeded lookback window, before any round has run. " +
+        "A[-1…-4] are H[0…3] and E[-1…-4] are H[4…7].";
+      return;
+    }
+    box.innerHTML =
+      "<b>The single cross-track edge.</b> The thick aqua arrow is " +
+      `A[${v.t - 4}] = ${hex8(v.a4)} feeding E[${v.t}] = ${hex8(v.Et)}. ` +
+      "Per SPEC.md §3.1 this is the <b>only</b> path by which the A track influences the E track " +
+      "at all, while E reaches into A at four points every round (the violet arrows). " +
+      "The two tracks are not symmetric, and this is where you can see it.";
+  }
+
+  /* ---- the wiring diagram ------------------------------------------- */
+  function drawWires() {
+    const svg = $("wires"), g = $("wirepaths"), inner = $("trackinner");
+    const rowA = $("rowA"), rowE = $("rowE");
+    const W = inner.scrollWidth, H = inner.offsetHeight;
+    svg.setAttribute("width", W); svg.setAttribute("height", H);
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+
+    while (g.firstChild) g.removeChild(g.firstChild);
+    const t = st.t;
+    if (t < 0) return;
+
+    const cx = (track, tt) => {
+      const c = trackCells[track][tt + 4];
+      return c.offsetLeft + c.offsetWidth / 2;
+    };
+    const aTop = rowA.offsetTop, aBot = rowA.offsetTop + rowA.offsetHeight;
+    const eTop = rowE.offsetTop, eBot = rowE.offsetTop + rowE.offsetHeight;
+
+    /* Every path here is dataflow; stroke colour is the SOURCE track. */
+    const add = (d, colour, width, head) => {
+      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p.setAttribute("d", d);
+      p.setAttribute("fill", "none");
+      p.setAttribute("stroke", colour);
+      p.setAttribute("stroke-width", width);
+      p.setAttribute("stroke-linecap", "round");
+      p.setAttribute("opacity", width > 2 ? "1" : "0.72");
+      p.setAttribute("marker-end", `url(#${head})`);
+      g.appendChild(p);
+    };
+    const AQUA = "#199e70", VIOLET = "#9085e9";
+
+    /* A[t-1..t-3] -> A[t]: arcs above the A row. */
+    for (let d = 1; d <= 3; d++) {
+      if (t - d < -4) continue;
+      const x1 = cx("A", t - d), x2 = cx("A", t);
+      const lift = aTop - (10 + d * 7);
+      add(`M ${x1} ${aTop} C ${x1} ${lift} ${x2} ${lift} ${x2} ${aTop - 1}`, AQUA, 1.5, "ah-a");
+    }
+    /* E[t-1..t-4] -> E[t]: arcs below the E row. */
+    for (let d = 1; d <= 4; d++) {
+      if (t - d < -4) continue;
+      const x1 = cx("E", t - d), x2 = cx("E", t);
+      const drop = eBot + (10 + d * 6);
+      add(`M ${x1} ${eBot} C ${x1} ${drop} ${x2} ${drop} ${x2} ${eBot + 1}`, VIOLET, 1.5, "ah-e");
+    }
+    /* E[t-1..t-4] -> A[t]: four crossings upward, through the band. */
+    const k = (eTop - aBot) * 0.62;
+    for (let d = 1; d <= 4; d++) {
+      if (t - d < -4) continue;
+      const x1 = cx("E", t - d), x2 = cx("A", t);
+      add(`M ${x1} ${eTop} C ${x1} ${eTop - k} ${x2} ${aBot + k} ${x2} ${aBot + 2}`, VIOLET, 1.5, "ah-e");
+    }
+    /* A[t-4] -> E[t]: the one crossing downward. Thicker, because it is
+     * the only one of its kind — same meaning, more emphasis. */
+    if (t - 4 >= -4) {
+      const x1 = cx("A", t - 4), x2 = cx("E", t);
+      add(`M ${x1} ${aBot} C ${x1} ${aBot + k} ${x2} ${eTop - k} ${x2} ${eTop - 2}`, AQUA, 3.2, "ah-a");
+    }
+
+    /* Keep the current round on screen while stepping or running. */
+    const c = trackCells.A[t + 4], sc = $("trackscroll");
+    const left = c.offsetLeft, right = left + c.offsetWidth;
+    if (left < sc.scrollLeft + 40) sc.scrollLeft = Math.max(0, left - 160);
+    else if (right > sc.scrollLeft + sc.clientWidth - 40) sc.scrollLeft = right - sc.clientWidth + 160;
+  }
+
+  /* ---- the difference chart ------------------------------------------
+   * Three series over 64 rounds is change-over-a-sequence, so these are
+   * lines rather than 192 bars; the y-axis is a Hamming weight, fixed at
+   * 0..32 so that the height of a curve means the same thing whatever
+   * message you type. One axis, no second scale.
+   * ------------------------------------------------------------------ */
+  const CH = { w: 700, h: 220, l: 34, r: 46, t: 12, b: 26 };
+
+  function chartGeometry() {
+    const n = Math.max(1, st.rounds - 1);
+    return {
+      x: (t) => CH.l + (t / n) * (CH.w - CH.l - CH.r),
+      y: (v) => CH.t + (1 - v / 32) * (CH.h - CH.t - CH.b),
+      invX: (px) => Math.round(((px - CH.l) / (CH.w - CH.l - CH.r)) * n),
+    };
+  }
+
+  function diffWeights() {
+    const A = [], E = [], W = [];
+    for (let t = 0; t < st.rounds; t++) {
+      A.push(popcount(st.trA.A[4 + t] ^ st.trB.A[4 + t]));
+      E.push(popcount(st.trA.E[4 + t] ^ st.trB.E[4 + t]));
+      W.push(popcount(st.trA.W[t] ^ st.trB.W[t]));
+    }
+    return { A, E, W };
+  }
+
+  function drawChart() {
+    const svg = $("chart");
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    const G = chartGeometry(), d = diffWeights();
+    const NS = "http://www.w3.org/2000/svg";
+    const mk = (tag, attrs, text) => {
+      const n = document.createElementNS(NS, tag);
+      for (const key in attrs) n.setAttribute(key, attrs[key]);
+      if (text !== undefined) n.textContent = text;
+      svg.appendChild(n);
+      return n;
+    };
+
+    for (const v of [0, 8, 16, 24, 32]) {
+      mk("line", { class: "grid-line", x1: CH.l, x2: CH.w - CH.r, y1: G.y(v), y2: G.y(v) });
+      mk("text", { class: "axis-text", x: CH.l - 6, y: G.y(v) + 3.5, "text-anchor": "end" }, String(v));
+    }
+    const step = st.rounds > 32 ? 8 : 4;
+    for (let t = 0; t < st.rounds; t += step) {
+      mk("text", { class: "axis-text", x: G.x(t), y: CH.h - 8, "text-anchor": "middle" }, String(t));
+    }
+    mk("text", { class: "axis-text", x: CH.l - 6, y: CH.t - 2, "text-anchor": "end" }, "bits");
+
+    const series = [
+      { key: "A", colour: "var(--a)", label: "ΔA" },
+      { key: "E", colour: "var(--e)", label: "ΔE" },
+      { key: "W", colour: "var(--w)", label: "ΔW" },
+    ];
+    /* Direct end labels, so identity is never carried by colour alone.
+     * Three curves can finish at the same height, so the labels are nudged
+     * apart before being drawn rather than left to overlap. */
+    const labs = series.map((s) => ({
+      s, v: d[s.key][st.rounds - 1], y: G.y(d[s.key][st.rounds - 1]),
+    })).sort((p, q) => p.y - q.y);
+    for (let i = 1; i < labs.length; i++) {
+      if (labs[i].y - labs[i - 1].y < 12) labs[i].y = labs[i - 1].y + 12;
+    }
+    for (const s of series) {
+      const pts = d[s.key].map((v, t) => `${G.x(t).toFixed(1)},${G.y(v).toFixed(1)}`).join(" ");
+      mk("polyline", { class: "serie", points: pts, stroke: s.colour });
+    }
+    for (const L of labs) {
+      mk("text", { class: "endlab", x: CH.w - CH.r + 6, y: L.y + 3.5, fill: L.s.colour },
+         `${L.s.label} ${L.v}`);
+    }
+    if (st.t >= 0) {
+      mk("line", { class: "nowline", x1: G.x(st.t), x2: G.x(st.t), y1: CH.t, y2: CH.h - CH.b });
+    }
+  }
+
+  function chartHover(ev) {
+    if (!st.trB) return;
+    const svg = $("chart"), box = svg.getBoundingClientRect();
+    const G = chartGeometry();
+    const px = (ev.clientX - box.left) * (CH.w / box.width);
+    const t = Math.max(0, Math.min(st.rounds - 1, G.invX(px)));
+    const d = diffWeights();
+    const tip = $("tooltip");
+    tip.textContent = `round ${t}\nΔA ${d.A[t]}  ΔE ${d.E[t]}  ΔW ${d.W[t]}  (of 32)`;
+    tip.style.left = (G.x(t) / CH.w * box.width) + "px";
+    tip.style.top = (G.y(Math.max(d.A[t], d.E[t], d.W[t])) / CH.h * box.height) + "px";
+    tip.style.opacity = "1";
+    return t;
+  }
+
+  /* =====================================================================
+   * Transport
+   * =================================================================== */
+  function setT(t) {
+    st.t = Math.max(-4, Math.min(st.rounds - 1, t));
+    $("tslider").value = String(st.t);
+    render();
+  }
+  function stepBy(d) {
+    /* Stepping backward is a genuine seek, not a recomputation: the whole
+     * A/E history for the block is already in the trace (SPEC.md §3 keeps
+     * it deliberately), so going back a round is just reading a lower
+     * index. That is the practical payoff of retaining 544 bytes. */
+    setT(st.t + d);
+  }
+  function setPlaying(on) {
+    st.playing = on;
+    const b = $("btnPlay");
+    b.textContent = on ? "⏸ pause" : "▶ run";
+    b.classList.toggle("on", on);
+    if (st.timer) { clearInterval(st.timer); st.timer = null; }
+    if (on) {
+      const fps = Number($("speed").value) || 8;
+      st.timer = setInterval(() => {
+        if (st.t >= st.rounds - 1) { setT(-4); return; }
+        stepBy(1);
+      }, 1000 / fps);
+    }
+  }
+
+  /* =====================================================================
+   * Wiring up
+   * =================================================================== */
+  function init() {
+    $("iv").value = Array.from(S.IV, hex8).join(" ");
+
+    buildTracks();
+    buildBits();
+    buildSched();
+
+    const onForm = () => { recompute(); };
+    for (const id of ["inA", "bitsA", "inB", "bitsB", "rounds", "iv"]) {
+      $(id).addEventListener("input", onForm);
+    }
+    for (const n of document.getElementsByName("modeA")) n.addEventListener("change", onForm);
+    for (const n of document.getElementsByName("modeB")) n.addEventListener("change", onForm);
+    $("blockidx").addEventListener("change", (e) => { st.block = Number(e.target.value); recompute(); });
+
+    $("ivreset").addEventListener("click", () => {
+      $("iv").value = Array.from(S.IV, hex8).join(" ");
+      recompute();
+    });
+    $("fixA").addEventListener("click", () => {
+      /* An explicit, user-initiated repair. The library refuses to mask
+       * stray low bits on its own — silently doing so would merge two
+       * distinct messages — but a button the user presses is not silent. */
+      const nbits = Number($("bitsA").value), rem = nbits % 8;
+      if (!rem) return;
+      const hex = $("inA").value.replace(/[\s_]/g, "");
+      if (hex.length < 2) return;
+      const last = parseInt(hex.slice(-2), 16) & ((0xff << (8 - rem)) & 0xff);
+      $("inA").value = hex.slice(0, -2) + last.toString(16).padStart(2, "0");
+      recompute();
+    });
+    $("toggleB").addEventListener("click", () => {
+      const on = !$("toggleB").classList.contains("on");
+      $("toggleB").classList.toggle("on", on);
+      $("toggleB").textContent = "difference mode: " + (on ? "on" : "off");
+      $("bwrap").classList.toggle("hidden", !on);
+      recompute();
+    });
+
+    $("btnFirst").addEventListener("click", () => setT(-4));
+    $("btnPrev").addEventListener("click", () => stepBy(-1));
+    $("btnNext").addEventListener("click", () => stepBy(1));
+    $("btnLast").addEventListener("click", () => setT(st.rounds - 1));
+    $("btnPlay").addEventListener("click", () => setPlaying(!st.playing));
+    $("speed").addEventListener("input", () => { if (st.playing) setPlaying(true); });
+    $("tslider").addEventListener("input", (e) => setT(Number(e.target.value)));
+
+    const chart = $("chart");
+    chart.addEventListener("mousemove", chartHover);
+    chart.addEventListener("mouseleave", () => { $("tooltip").style.opacity = "0"; });
+    chart.addEventListener("click", (ev) => { const t = chartHover(ev); if (t !== undefined) setT(t); });
+
+    document.addEventListener("keydown", (ev) => {
+      const tag = (ev.target.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "select" || tag === "textarea") return;
+      if (ev.key === "ArrowRight") { stepBy(1); ev.preventDefault(); }
+      else if (ev.key === "ArrowLeft") { stepBy(-1); ev.preventDefault(); }
+      else if (ev.key === " ") { setPlaying(!st.playing); ev.preventDefault(); }
+      else if (ev.key === "Home") { setT(-4); ev.preventDefault(); }
+      else if (ev.key === "End") { setT(st.rounds - 1); ev.preventDefault(); }
+    });
+
+    /* Cell geometry moves when the window resizes, and the wires are drawn
+     * in content coordinates, so they have to be redrawn with it. */
+    window.addEventListener("resize", () => { if (st.trA) drawWires(); });
+
+    recompute();
+    setTimeout(runSelftest, 0);
+  }
+
+  /* `SHAVAR` missing means shavar.js did not load — say so on the page
+   * rather than leaving a silent blank, which under file:// is the single
+   * most likely thing to go wrong. */
+  if (!S) {
+    document.addEventListener("DOMContentLoaded", () => {
+      document.body.innerHTML =
+        '<p style="padding:2rem;font:14px monospace;color:#ffb4b4">' +
+        "shavar.js did not load. index.html must sit in the same directory as shavar.js." +
+        "</p>";
+    });
+    return;
+  }
+
+  root.SHAVAR_UI = { init, state: st, render };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})(typeof globalThis !== "undefined" ? globalThis : this);
+</script>
+</html>

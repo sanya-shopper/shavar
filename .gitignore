@@ -13,3 +13,6 @@ c/*.so
 c/shavar
 c/shavar-shared
 c/*.plist
+
+# Lean build outputs
+lean/.lake/

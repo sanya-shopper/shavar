@@ -1,0 +1,14 @@
+name = "shavar"
+version = "0.1.0"
+defaultTargets = ["Shavar", "shavar"]
+
+# `globs` makes every module under Shavar/ part of the library, including
+# Shavar/Tests.lean (build-time known-answer checks) and Shavar/Audit.lean
+# (the `#print axioms` report). Both therefore run on every `lake build`.
+[[lean_lib]]
+name = "Shavar"
+globs = ["Shavar", "Shavar.+"]
+
+[[lean_exe]]
+name = "shavar"
+root = "Main"

@@ -308,11 +308,38 @@ or all match NIST on byte-aligned input and diverge on `L = 5`.
 
 A caveat stated plainly: `bv_decide` discharges goals by bit-blasting to
 CaDiCaL and checking the returned LRAT certificate inside Lean. The SAT solver
-is *not* trusted — but the tactic uses the `Lean.ofReduceBool` axiom, which
-places the Lean compiler in the trusted computing base. Proofs here are
-therefore machine-checked modulo the compiler, not modulo the kernel alone.
-That is a weaker guarantee than a kernel-only proof and is flagged wherever it
-is relied on.
+is *not* trusted. The certificate check, however, runs as compiled native
+code, which places the Lean compiler in the trusted computing base. Proofs
+obtained that way are machine-checked modulo the compiler, not modulo the
+kernel alone.
+
+Concretely, on the toolchain used here (Lean 4.32.2) a `bv_decide` proof
+carries a per-theorem axiom named `<theorem>._native.bv_decide.ax_N`, so
+`#print axioms` on such a theorem reports something like:
+
+```
+'tst' depends on axioms: [propext, Classical.choice, Quot.sound,
+                          tst._native.bv_decide.ax_1_5]
+```
+
+whereas a kernel-only proof reports just `[propext, Quot.sound]` (plus
+`Classical.choice` where classical reasoning is used). The distinction is
+visible and mechanically checkable, which is why `lean/Shavar/Audit.lean`
+prints the axiom list for every headline theorem on each build rather than
+asserting in prose that the proofs are clean.
+
+Older material — including Lean's own 4.12 release notes, when `bv_decide`
+was introduced — describes the mechanism as using the `Lean.ofReduceBool`
+axiom. That is no longer accurate for 4.32.2; the trust story is unchanged
+(solver untrusted, compiler trusted) but the axiom name is different. Verified
+directly against the installed toolchain rather than taken from the
+documentation.
+
+Worth noting for anyone reading the proofs: the two identities named in V2 are
+proved *twice* in `lean/`, once by `bv_decide` and once by case analysis on
+individual bit positions. The second route needs no compiler trust, so for
+those particular claims the caveat above does not actually bite. Where a proof
+is kernel-only, the repository says so and shows the axiom list.
 
 ---
 

@@ -1,0 +1,275 @@
+name: ci
+
+# The point of this CI is not redundancy with local testing. It is to reach
+# the things a macOS/arm64 laptop cannot reach at all:
+#
+#   * valgrind          — does not exist on Apple Silicon
+#   * MemorySanitizer   — unsupported on darwin/arm64
+#   * AddressSanitizer  — builds locally but hangs at runtime init on this
+#                         host, so it has never actually run there
+#   * GCC               — the Mac has only clang; `gcc` is a symlink to it
+#   * a big-endian CPU  — the C code claims endian independence, and s390x
+#                         under QEMU is the only way to actually test that
+#                         claim rather than merely assert it
+#
+# Everything below is chosen to close one of those gaps.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+
+  # ---------------------------------------------------------------- C
+  c-compilers:
+    name: "C: ${{ matrix.cc }} / ${{ matrix.std }} / ${{ matrix.opt }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc-13, gcc-14, clang-18]
+        std: [c99, c11, c17]
+        opt: ["-O0", "-O2", "-O3", "-Os"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install compiler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ${{ matrix.cc }} || true
+          ${{ matrix.cc }} --version
+      - name: Build and self-test
+        working-directory: c
+        run: |
+          ${{ matrix.cc }} -std=${{ matrix.std }} ${{ matrix.opt }} \
+            -Wall -Wextra -pedantic-errors -Werror \
+            shavar.c main.c -o shavar
+          ./shavar selftest
+
+  c-sanitizers:
+    name: "C: sanitizers (the ones that do not run on macOS)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-18
+      - name: AddressSanitizer + LeakSanitizer
+        working-directory: c
+        # Both of these are unavailable locally: ASan hangs at init on the dev
+        # machine and LSan is unsupported on arm64 macOS. This is the first
+        # place they actually execute.
+        run: |
+          clang-18 -std=c99 -O1 -g -fsanitize=address -fno-omit-frame-pointer \
+            shavar.c main.c -o s-asan
+          ASAN_OPTIONS=detect_leaks=1:detect_stack_use_after_return=1:strict_string_checks=1 \
+            ./s-asan selftest
+      - name: MemorySanitizer
+        working-directory: c
+        # Detects reads of uninitialised memory. Unsupported on darwin/arm64.
+        # -fsanitize-memory-track-origins makes any finding say where the
+        # uninitialised value came from, not merely that one was used.
+        run: |
+          clang-18 -std=c99 -O1 -g -fsanitize=memory \
+            -fsanitize-memory-track-origins=2 -fno-omit-frame-pointer \
+            shavar.c main.c -o s-msan
+          ./s-msan selftest
+      - name: UndefinedBehaviorSanitizer
+        working-directory: c
+        run: |
+          clang-18 -std=c99 -O1 -g \
+            -fsanitize=undefined,integer,nullability,local-bounds \
+            -fno-sanitize=unsigned-integer-overflow \
+            -fno-sanitize-recover=all \
+            shavar.c main.c -o s-ubsan
+          ./s-ubsan selftest
+
+  c-valgrind:
+    name: "C: valgrind (impossible on Apple Silicon)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
+      - name: memcheck
+        working-directory: c
+        # SHAVAR_QUICK=1 drops the million-'a' vector: under valgrind it is
+        # ~50x slower and adds no coverage, since every code path is already
+        # exercised by the short vectors. The restriction is on the input
+        # size, never on the checks.
+        run: |
+          gcc -std=c99 -O1 -g shavar.c main.c -o shavar
+          SHAVAR_QUICK=1 valgrind \
+            --error-exitcode=99 --leak-check=full --show-leak-kinds=all \
+            --track-origins=yes --errors-for-leak-kinds=all \
+            ./shavar selftest
+      - name: memcheck on the trace path
+        working-directory: c
+        run: |
+          valgrind --error-exitcode=99 --leak-check=full --track-origins=yes \
+            ./shavar trace 616263 24 > /dev/null
+      - name: memcheck on the rejection path
+        working-directory: c
+        run: |
+          valgrind --error-exitcode=99 --leak-check=full \
+            ./shavar hash b4 5 || test $? -eq 2
+
+  c-big-endian:
+    name: "C: big-endian (s390x under QEMU)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install s390x cross toolchain and QEMU
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-s390x-linux-gnu qemu-user-static
+      - name: Cross-compile and run big-endian
+        working-directory: c
+        # shavar.c claims to be endian-independent: it never casts a byte
+        # pointer to uint32_t and does every conversion with explicit shifts.
+        # This is the test of that claim. If any host-endianness assumption
+        # had crept in, the digests here would differ from the little-endian
+        # ones, because SHA-256 is defined big-endian throughout.
+        run: |
+          s390x-linux-gnu-gcc -std=c99 -O2 -static shavar.c main.c -o shavar-be
+          file shavar-be
+          qemu-s390x-static ./shavar-be selftest
+          test "$(qemu-s390x-static ./shavar-be hash 616263 24)" \
+             = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          echo "big-endian digests match little-endian"
+
+  c-libraries:
+    name: "C: static and shared library packaging"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build .a and .so and link against both
+        working-directory: c
+        run: |
+          make libshavar.a libshavar.so
+          ls -l libshavar.a libshavar.so
+          # Prove the shared object actually resolves at runtime, which a
+          # plain build does not demonstrate.
+          cc -std=c99 -O2 main.c -L. -lshavar -Wl,-rpath,'$ORIGIN' -o shavar-shared
+          ./shavar-shared selftest
+          cc -std=c99 -O2 main.c libshavar.a -o shavar-static
+          ./shavar-static selftest
+          nm -D libshavar.so | grep -c ' T shavar_' || true
+
+  # ------------------------------------------------- other implementations
+  implementations:
+    name: "Implementations: python, perl, scheme, shell, js"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install runtimes
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq perl zsh nodejs
+          # chibi-scheme is not reliably packaged; fall back to source.
+          sudo apt-get install -y -qq chibi-scheme || {
+            git clone --depth 1 https://github.com/ashinn/chibi-scheme /tmp/chibi
+            make -C /tmp/chibi -j"$(nproc)" >/dev/null
+            sudo make -C /tmp/chibi install >/dev/null
+            sudo ldconfig
+          }
+          chibi-scheme -V | head -1
+      - name: Build C reference
+        run: make -C c shavar
+      - run: python3 py/shavar.py selftest
+      - run: perl pl/shavar.pl selftest
+      - run: chibi-scheme scm/shavar.scm selftest
+      - run: bash sh/shavar.sh selftest
+      - run: zsh sh/shavar.sh selftest
+      - name: JavaScript under node
+        # The committed CLI targets jsc, which is Safari's engine and is the
+        # deployment target that matters. node is used here only because no
+        # jsc is available on a Linux runner; tests/node-cli.js is a thin
+        # adapter over the same unmodified js/shavar.js.
+        run: node tests/node-cli.js selftest
+      - name: Cross-implementation trace agreement
+        run: bash tests/ci-crosscheck.sh
+
+  # ---------------------------------------------------------------- Lean
+  lean:
+    name: "Lean 4: build and check proofs"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install elan
+        run: |
+          curl -sSfL https://github.com/leanprover/elan/releases/latest/download/elan-x86_64-unknown-linux-gnu.tar.gz \
+            | tar xz
+          ./elan-init -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Cache Lean build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.elan
+            lean/.lake
+          key: lean-${{ runner.os }}-${{ hashFiles('lean/lean-toolchain', 'lean/lakefile.toml') }}
+      - name: Build
+        working-directory: lean
+        run: lake build
+      - name: Fail on any sorry
+        working-directory: lean
+        # A `sorry` is an admitted proof. Warnings are easy to scroll past, so
+        # the build is failed outright if one appears in a place that is not
+        # explicitly registered as admitted. This is what stops the proof
+        # story from silently rotting.
+        run: |
+          if lake build 2>&1 | grep -i "declaration uses 'sorry'"; then
+            echo "::error::a proof depends on sorry"
+            exit 1
+          fi
+          echo "no sorries"
+
+  # ------------------------------------------------------------------ PDF
+  paper:
+    name: "Doc: build shavar.pdf and check references"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install TeX
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq texlive-latex-recommended texlive-latex-extra \
+            texlive-fonts-recommended texlive-pictures biber latexmk
+      - name: Build
+        working-directory: doc
+        run: |
+          if [ -f shavar.tex ]; then latexmk -pdf -interaction=nonstopmode shavar.tex; \
+          else echo "doc/shavar.tex not present yet"; fi
+      - name: Reject unresolved references
+        working-directory: doc
+        # An unresolved \ref or \cite renders as ?? in the PDF. That is a
+        # silent documentation bug of exactly the kind this repo is meant not
+        # to ship, so it fails the build.
+        run: |
+          if [ -f shavar.log ]; then
+            ! grep -qE "(There were undefined references|Citation .* undefined|Reference .* undefined)" shavar.log \
+              || { grep -nE "undefined" shavar.log; exit 1; }
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shavar-pdf
+          path: doc/shavar.pdf
+          if-no-files-found: ignore
+
+  # -------------------------------------------------------------- macOS
+  macos:
+    name: "macOS: native build and Safari's JS engine"
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: C
+        run: make -C c check
+      - run: python3 py/shavar.py selftest
+      - run: perl pl/shavar.pl selftest
+      - run: bash sh/shavar.sh selftest
+      - run: zsh sh/shavar.sh selftest
+      - name: JavaScriptCore (the actual Safari engine)
+        run: ./js/shavar-cli.js selftest

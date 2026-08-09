@@ -170,6 +170,46 @@ the correct reference (Böving et al., OOPSLA 2025) is cited with its DOI and
 an explicit "no local copy" note. A guessed citation that happens to resolve
 to *something* is worse than no citation, because it looks checked.
 
+### The harness found what agreement alone could not
+
+The cross-testing harness landed with the NIST CAVP vectors: **1154 known
+answers, 896 of them not byte-aligned**, checksummed and committed so the
+suite runs offline. That materially improves an earlier, gloomier assessment
+recorded above. It is true that no *live* oracle on this machine can hash a
+partial byte -- openssl, LibreSSL, `shasum` and `sha256sum` are all
+byte-only -- but the NIST bit-oriented files are an external authority, and
+they downloaded. Sub-byte hashing is therefore externally validated after all,
+for 896 lengths. Only sub-byte lengths *outside* that set rest on
+cross-implementation agreement alone.
+
+The harness keeps that distinction in its output rather than in a footnote:
+`verified` (matched NIST or an oracle), `agreed` (only other implementations
+answered), and `lone` (nothing to compare against) are three separate columns
+and are never summed. Disputes with no authority present do not pick a winner
+by majority; every participant is marked disputed and the groups printed.
+
+**A real divergence, found by testing a feature nothing had tested.** The
+harness noted that reduced-round mode was exposed but unexercised. Testing it
+turned up two disagreements at the boundaries, both traceable to `spec/CLI.md`
+never stating the valid range of `rounds`:
+
+- `rounds = 0` was accepted by six implementations and rejected by JavaScript.
+- `rounds > 64` was rejected by six -- and **silently clamped to 64 by C**, so
+  `hash <msg> <n> 100` printed a correct-looking SHA-256 digest in answer to a
+  request that means nothing.
+
+The C behaviour was mine, and it is the worse of the two: a confidently wrong
+answer beats an error message only in the sense that it is harder to notice.
+Fixed by specifying the range (0..64, with 0 the legal feed-forward-only
+case), rejecting anything above it, and correcting both implementations. All
+seven now agree on every round count from 0 to 64 and all reject 65 and 100
+with exit 2.
+
+The general lesson is worth keeping: every place these seven independent
+implementations diverged turned out to be a place the specification was silent,
+not a place someone made a mistake. Unstated boundaries are where independent
+readings separate.
+
 ### Notes on method
 
 Six implementations were written concurrently by separate agents, each owning

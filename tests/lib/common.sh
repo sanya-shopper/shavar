@@ -342,15 +342,33 @@ build_c() {
   [ -x "$ROOT/c/shavar" ]
 }
 
-# find_lean_bin — locate the `lake exe` output.  The name is not fixed by the
-# CLI contract, so search the standard build directory for an executable.
+# find_lean_bin — locate the `lake exe` that speaks the CLI.md contract.
+#
+# `lean/` builds more than one executable: `shavar` is the CLI, and
+# `powdriver` is the marshalling shim tests/pow.sh uses to reach the
+# library-only proof-of-work comparison.  So the conventional name is tried
+# first and the directory scan is only a fallback.
+#
+# This used to be a bare scan that took whatever came first.  With one
+# executable that was fine; the moment a second appeared, glob order put
+# `powdriver` ahead of `shavar` and every Lean row in nist.sh and
+# crosstest.sh turned into "BROKEN: usage: powdriver VECTORS.tsv".  The
+# failure was loud, which is the harness working correctly, but the cause was
+# an assumption ("there is exactly one binary") that nothing stated.
 find_lean_bin() {
   if [ -n "${SHAVAR_LEAN_BIN:-}" ] && [ -x "${SHAVAR_LEAN_BIN}" ]; then
     export SHAVAR_LEAN_BIN; return 0
   fi
+  if [ -x "$ROOT/lean/.lake/build/bin/shavar" ]; then
+    SHAVAR_LEAN_BIN=$ROOT/lean/.lake/build/bin/shavar
+    export SHAVAR_LEAN_BIN; return 0
+  fi
+  # Fallback: the executable name is not fixed by CLI.md, so accept any single
+  # candidate that is not one of the known non-CLI helpers.
   for cand in "$ROOT"/lean/.lake/build/bin/*; do
     [ -f "$cand" ] && [ -x "$cand" ] || continue
     case $cand in *.hash|*.trace|*.rsp|*.olean|*.c|*.o) continue ;; esac
+    case ${cand##*/} in powdriver) continue ;; esac
     SHAVAR_LEAN_BIN=$cand; export SHAVAR_LEAN_BIN; return 0
   done
   return 1

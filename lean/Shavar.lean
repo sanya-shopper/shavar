@@ -6,3 +6,4 @@ import Shavar.Pad
 import Shavar.Compress
 import Shavar.Hash
 import Shavar.Cli
+import Shavar.Pow

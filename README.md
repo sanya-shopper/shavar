@@ -75,9 +75,20 @@ idiom budget on it, and that choice shapes everything else in the file.)
 Test tooling is exempt and uses whatever it likes.
 
 All seven support **arbitrary bit lengths**, not just whole bytes; a
-**caller-supplied chaining value**; and **reduced round counts** — the last two
+**caller-supplied chaining value**; **reduced round counts** — the last two
 unreachable from a normal hashing API and both prerequisites for free-start
-and reduced-round analysis.
+and reduced-round analysis — and the **proof-of-work comparison** of
+`SPEC.md` §10.
+
+That last one is library-only, with no command-line verb, because the uniform
+CLI contract is shared by all seven and is not the place to grow a verb only
+some callers want. It is Bitcoin's convention, which means the digest is read
+**little-endian**: byte 0, the first byte the hash function emitted, is the
+*least* significant of the 256-bit value. That is the reverse of the order the
+bytes are written in, and it is why a block hash is displayed reversed
+relative to the digest actually computed. Getting it backwards is silent, so
+`tests/pow.sh` pins it with two vectors that are the same 32 bytes in opposite
+orders, and `lean/Shavar/Pow.lean` proves it.
 
 ## Correctness
 
@@ -92,10 +103,12 @@ Verified in CI on every push (45 jobs):
 - **Big-endian verified**, not assumed: cross-compiled to s390x and run under
   QEMU, digests identical.
 - 36 compiler configurations; Lean build fails on any `sorry`.
+- **The proof-of-work byte order**, checked in all eight builds against
+  vectors anchored to the Bitcoin genesis block, and *proved* in Lean.
 
-**What is proved, versus tested.** The equivalence of the two forms, and the
-padding length and injectivity theorems, are *proved* in Lean with kernel-only
-axioms. Everything else is *tested*. The repository keeps that line sharp, and
+**What is proved, versus tested.** The equivalence of the two forms, the
+padding length and injectivity theorems, and the proof-of-work byte order are
+*proved* in Lean with kernel-only axioms. Everything else is *tested*. The repository keeps that line sharp, and
 so does the harness: its summary separates `verified` (matched NIST or an
 external oracle) from `agreed` (only other implementations answered), and
 never adds them together.

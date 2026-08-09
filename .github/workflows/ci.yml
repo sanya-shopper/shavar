@@ -268,6 +268,13 @@ jobs:
             exit 1
           fi
           echo "no sorries"
+      - name: Proof-of-work comparison, Lean against C
+        # The `implementations` job runs tests/pow.sh too, but with no Lean
+        # toolchain the Lean column is absent there. This is the only place the
+        # Lean version of SPEC.md §10 is executed, and it is run alongside C so
+        # that mutual agreement (V7) is actually checked rather than just the
+        # expected verdicts.
+        run: bash tests/pow.sh --impls "c lean"
 
   # ------------------------------------------------------------------ PDF
   paper:

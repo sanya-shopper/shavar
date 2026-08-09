@@ -1,6 +1,6 @@
 name = "shavar"
 version = "0.1.0"
-defaultTargets = ["Shavar", "shavar"]
+defaultTargets = ["Shavar", "shavar", "powdriver"]
 
 # `globs` makes every module under Shavar/ part of the library, including
 # Shavar/Tests.lean (build-time known-answer checks) and Shavar/Audit.lean
@@ -12,3 +12,12 @@ globs = ["Shavar", "Shavar.+"]
 [[lean_exe]]
 name = "shavar"
 root = "Main"
+
+# The proof-of-work comparison of SPEC.md §10 has no subcommand — it is
+# library-only, so it is invisible to the CLI contract that `shavar` implements.
+# `powdriver` is the marshalling shim tests/pow.sh runs to reach it, and it is a
+# default target so that a plain `lake build` produces everything the test
+# suite expects to find.
+[[lean_exe]]
+name = "powdriver"
+root = "PowDriver"

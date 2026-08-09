@@ -11,6 +11,7 @@ is why the suite is split the way it is. `spec/SPEC.md` §8 names them:
 | --- | --- | --- |
 | V5 | the implementations agree with FIPS 180-4 | `nist.sh` — NIST CAVP known-answer vectors; and the external-oracle columns of `crosstest.sh` |
 | V6 | the implementations agree with **each other** | `crosstest.sh` — swept and random bit lengths, compared on digests *and* on per-round traces |
+| V7 | the proof-of-work comparison reads the digest in the right byte order | `pow.sh` — vectors anchored to the Bitcoin genesis block, run through all eight builds |
 
 Neither subsumes the other. Eight implementations could agree with each other
 and all be wrong (V5 catches that), or all match NIST on byte-aligned input and
@@ -132,6 +133,39 @@ Three conventions in the `.rsp` files are easy to get wrong, and
   transformation is applied, only verification: all 1154 vectors pass that
   validation, and any that did not would be written to a `rejected` file with a
   reason rather than repaired.
+
+### `pow.sh` — the proof-of-work comparison (V7)
+
+Runs the 18 vectors of `pow-vectors.tsv` through every implementation and
+compares the columns, twice over: against the expected verdicts, and against
+each other.
+
+This phase exists separately because the comparison specified in `SPEC.md` §10
+is **library-only**. It has no subcommand, so `crosstest.sh` — which drives
+everything through `spec/CLI.md` — cannot see it, and without `pow.sh` it
+would be the one part of the repository whose mutual agreement nothing
+checked. Each implementation therefore gets a small driver under
+`pow-drivers/`, which marshals arguments and nothing else: no driver decides
+anything, every verdict comes from the implementation it loads.
+
+What the vectors are for: reading a digest as a 256-bit number requires
+choosing a byte order, and Bitcoin's choice is little-endian — `digest[0]`,
+the first byte the hash function emitted, is the *least* significant. Two
+vectors, `genesis-le` and `genesis-be`, are the same 32 bytes in opposite
+orders and disagree. An implementation that read the digest big-endian would
+swap both verdicts and remain perfectly self-consistent, so that pair is what
+separates a correct reading from a plausible one. Both are anchored to the
+real Bitcoin genesis block rather than to this repository's own arithmetic.
+
+The last phase mutates a copy of `c/shavar.c` to read the digest big-endian
+and requires the comparison to reject it — 5 of the 18 vectors do. Nothing in
+the repository is touched; the mutant is built from a copy in the work
+directory. Without that step a green run would be consistent with a harness
+that never looked.
+
+The Lean version is checked here too, and additionally *proves* the byte
+order: `lean/Shavar/Pow.lean` shows the byte-at-a-time walk agrees with the
+ordering of the two numbers those bytes denote, kernel-only, no `sorry`.
 
 ### `crosstest.sh` — cross-implementation agreement (V6)
 
@@ -295,6 +329,9 @@ tests/
   contract.sh         CLI.md encoding, exit codes, rejection rules
   nist.sh             NIST CAVP known-answer vectors            (V5)
   crosstest.sh        swept + random corpus, oracles, trace diff (V6)
+  pow.sh              proof-of-work comparison, all eight builds (V7)
+  pow-vectors.tsv     the 18 shared vectors, SPEC.md §10.5
+  pow-drivers/        one marshalling shim per language; they decide nothing
   fetch-vectors.sh    (re)download the NIST archives
   vectors/
     README.md         provenance, counts, and the .rsp format traps

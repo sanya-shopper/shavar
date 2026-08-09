@@ -6,6 +6,92 @@ preserved alongside the history of code.
 
 ---
 
+## 2026-08-09 — Proof-of-work comparison, in all seven languages
+
+`SPEC.md` §10 specifies a proof-of-work (PoW) comparison — decode a compact
+Bitcoin `nBits` target and decide whether a digest meets it — and all seven
+implementations now have it, along with the CWEB literate version.
+
+**The specification was written before any of the code**, which for this
+feature is not ceremony. The digest has to be read as one 256-bit integer, and
+the byte order that requires is a *convention*: Bitcoin reads it
+little-endian, so `digest[0]`, the first byte the hash function emitted, is
+the least significant. Reading it the other way is silent — it compiles, it
+runs, and it returns a plausible verdict — and this repository's own record
+already says that every place seven independent implementations diverged was a
+place the specification was silent. So the order was fixed on paper first, in
+a section with a worked example and a figure, and only then implemented.
+
+**Scoped library-only, on request, with the consequence handled rather than
+accepted.** There is no CLI verb, which means `crosstest.sh` — which drives
+everything through `spec/CLI.md` — cannot see the new code at all. Left there,
+the PoW comparison would have been the only part of the repository whose
+seven-way agreement nothing checked, which is the property the project exists
+to demonstrate. `tests/pow.sh` closes that: one small marshalling driver per
+language under `tests/pow-drivers/`, deciding nothing themselves, and the
+columns compared both against expected verdicts and against each other.
+
+**The vectors are anchored outside this repository.** Two of the eighteen are
+the same 32 bytes in opposite orders: the Bitcoin genesis block's doubled
+SHA-256 as emitted, and its reverse. They disagree, and no other vector
+separates the two readings as sharply — an implementation reading the digest
+big-endian swaps both verdicts and stays perfectly self-consistent. The
+genesis header was hashed to confirm it reproduces the published block hash
+before any of it was written down, rather than transcribing a value and hoping.
+
+**The harness is required to fail.** The last phase of `pow.sh` mutates a copy
+of `c/shavar.c` to read the digest big-endian and asserts the comparison
+rejects it; 5 of 18 vectors catch it. Nothing in the repository is touched.
+Without that step, "all green" would have been equally consistent with a
+harness that never looked — the same reasoning that produced `selfcheck.sh`.
+
+**Lean does better than test it.** `lean/Shavar/Pow.lean` runs the same
+byte-at-a-time walk the other six do and then proves `powCheck_iff`: the walk
+answers "met" exactly when the little-endian reading of the digest is at most
+the target. The statement quantifies over the two *numbers* and mentions no
+byte index at all, so a big-endian version could not satisfy it. Kernel-only —
+`[propext, Classical.choice, Quot.sound]`, no `bv_decide` native axiom, no
+`sorry`.
+
+### Findings
+
+- **Scheme needed a modulino guard.** `scm/shavar.scm` ran its CLI on load, so
+  a test driver could not reach its procedures. It now checks `SHAVAR_LIB`
+  through `get-environment-variable`, which is already in the
+  `(scheme process-context)` import it had — no new dependency, and the same
+  spelling `sh/shavar.sh` had been using all along. Perl already had the idiom.
+- **A too-broad `guard` nearly turned a broken driver into a verdict.** The
+  Scheme driver wraps `pow-check` in `guard` to turn an invalid `nBits` into
+  the verdict "invalid". On its first run it printed "invalid" for all
+  eighteen vectors — not because the implementation was wrong but because the
+  driver had never loaded it, and the guard swallowed the unbound-variable
+  error. `pow.sh` caught it as a disagreement, but the failure mode is worth
+  recording: an exception handler wide enough to catch "this is malformed" is
+  usually also wide enough to catch "this is broken", and the two must not
+  produce the same output. There is now a canary outside the guard.
+- **A second Lean executable broke implementation discovery.** `find_lean_bin`
+  in `tests/lib/common.sh` scanned `lean/.lake/build/bin/` and took the first
+  executable it found, which was fine while there was exactly one. Adding
+  `powdriver` put it ahead of `shavar` in glob order, and every Lean row in
+  `nist.sh` and `crosstest.sh` became `BROKEN: usage: powdriver VECTORS.tsv`.
+  The harness failed loudly and named the cause, which is it working properly;
+  the lesson is about the assumption underneath — "there is exactly one
+  binary" was never stated anywhere, so nothing protected it. Discovery now
+  prefers the conventional name and treats the scan as a fallback.
+- **No `ring`, no `positivity`.** `lean/` deliberately has no Mathlib
+  dependency, so the arithmetic in the proofs is core `Nat` lemmas and `omega`
+  over abstracted nonlinear atoms. Worth knowing before reaching for a tactic.
+- **JavaScript's bitwise operators are signed.** `nBits >>> 24` rather than
+  `>> 24`, and an explicit `>>> 0` on entry, because a target with its top bit
+  set would otherwise decode as a negative number.
+- **Difficulty as a float is deliberately absent.** The conventional
+  `difficulty_1_target ÷ target` ratio is not computed anywhere: the shell
+  implementation has no floating-point arithmetic at all, and seven
+  independently rounded approximations of one ratio is exactly the unstated
+  boundary this project keeps finding at the root of divergence.
+
+---
+
 ## 2026-08-09 — The C implementation as a CWEB literate program
 
 `cweb/shavar-cweb.w` is a single Knuth/Levy CWEB file that `ctangle` turns into

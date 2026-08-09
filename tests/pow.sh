@@ -209,6 +209,45 @@ for id in $PRESENT; do
 done
 say ""
 
+# ---------------------------------------------------------------------------
+# Self-check: does this script actually catch the bug it exists to catch?
+#
+# "All green" is the output both of a correct implementation and of a harness
+# that never looks. So a copy of c/shavar.c is mutated to read the digest
+# big-endian -- the one-character error the whole section is about -- and the
+# comparison is required to reject it. Nothing in the repository is touched:
+# the mutant is built in the work directory from a copy.
+# ---------------------------------------------------------------------------
+say "== self-check: a deliberately byte-reversed implementation must FAIL =="
+if [ -x "$WORK/driver-c" ]; then
+  sed 's/digest\[SHAVAR_DIGEST_BYTES - 1 - i\]/digest[i]/' \
+      "$REPO/c/shavar.c" > "$WORK/mutant.c"
+  if cmp -s "$REPO/c/shavar.c" "$WORK/mutant.c"; then
+    say "  could not inject the mutation: the expected source line was not found"
+    say "  (the self-check is therefore vacuous, which is itself a failure)"
+    FAILURES=$((FAILURES + 1))
+  elif "$CC" -std=c99 -O1 -I"$REPO/c" "$DRIVERS/driver.c" "$WORK/mutant.c" \
+         -o "$WORK/driver-mutant" 2>/dev/null; then
+    "$WORK/driver-mutant" "$VECTORS" > "$WORK/out.mutant" 2>/dev/null
+    if diff -q "$WORK/expected" "$WORK/out.mutant" >/dev/null 2>&1; then
+      say "  MUTANT PASSED — these vectors do not distinguish the byte orders,"
+      say "  so a green run above would have meant nothing"
+      FAILURES=$((FAILURES + 1))
+    else
+      n=$(join -t"$(printf '\t')" "$WORK/expected" "$WORK/out.mutant" |
+            awk -F'\t' '$2 != $3' | wc -l | tr -d ' ')
+      printf '  mutant rejected on %s of %s vectors — the check has teeth\n' \
+             "$n" "$NVEC"
+    fi
+  else
+    say "  mutant failed to build; self-check skipped"
+    FAILURES=$((FAILURES + 1))
+  fi
+else
+  say "  skipped: no C driver to mutate"
+fi
+say ""
+
 say "=============================================================="
 if [ "$FAILURES" -eq 0 ]; then
   say "PASS  pow: $NVEC vectors x$(printf '%s' "$PRESENT" | wc -w | tr -d ' ') implementations, no disagreement"

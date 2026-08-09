@@ -93,6 +93,10 @@ runpart() {
 runpart selfcheck sh "$TESTS_DIR/selfcheck.sh"
 runpart constants sh "$TESTS_DIR/constants.sh" --keep
 runpart contract  sh "$TESTS_DIR/contract.sh"  --keep
+# V7. Runs in both modes: it is eighteen vectors and costs about a second, and
+# it is the only phase that reaches the proof-of-work comparison at all, since
+# that has no CLI verb for crosstest.sh to drive.
+runpart pow       sh "$TESTS_DIR/pow.sh"
 
 if [ "$DO_NIST" = 1 ]; then
   runpart nist sh "$TESTS_DIR/nist.sh" --mode "$MODE" --keep --jobs "$JOBS"

@@ -110,4 +110,17 @@ in trust. -/
 #print axioms not_wf_b4_5
 #print axioms padBits_ne_of_wellFormed_ne
 
+/-! ## V7 — the proof-of-work comparison reads the digest in the right order
+
+`powCheck_iff` is the one that would break if the byte order were wrong. It
+says the byte-at-a-time walk — the same loop the other six implementations
+run — answers "met" exactly when the *little-endian* reading of the digest is
+at most the target. The statement is about the two numbers and mentions no
+byte indices at all, so a version that read the digest big-endian could not
+satisfy it. -/
+
+#print axioms beValue_lt
+#print axioms cmpBE_ne_gt_iff
+#print axioms powCheck_iff
+
 end Shavar

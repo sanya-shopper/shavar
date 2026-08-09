@@ -253,13 +253,16 @@
    *
    * @param {Uint32Array} h      8 words, MUTATED to the outgoing value
    * @param {Uint8Array}  block  64 bytes
-   * @param {number}      rounds 1..64
+   * @param {number}      rounds 0..64 (0 = feed-forward only)
    * @param {boolean}     wantTrace
    * @returns {Trace|null}
    */
   function compress(h, block, rounds = ROUNDS, wantTrace = false) {
-    if (!Number.isInteger(rounds) || rounds < 1 || rounds > ROUNDS) {
-      throw new ShavarError(`rounds must be an integer in 1..${ROUNDS}`);
+    // rounds === 0 is a legal degenerate case, not an error: no round runs
+    // and the block contributes only its feed-forward. spec/CLI.md fixes the
+    // range at 0..64 inclusive, and the other six implementations accept 0.
+    if (!Number.isInteger(rounds) || rounds < 0 || rounds > ROUNDS) {
+      throw new ShavarError(`rounds must be an integer in 0..${ROUNDS}`);
     }
 
     const hIn = h.slice();               // copy, for the trace

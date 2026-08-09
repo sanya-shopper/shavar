@@ -317,14 +317,17 @@ The harness may use `awk`, `sed` and `python3` freely. The "core language only,
 no modules" rule constrains the eight implementations under test, not the tools
 testing them.
 
-Two further files in this directory belong to the JavaScript implementation's
-CI setup rather than to this harness, and are not invoked by `run.sh`:
+One further file in this directory is not invoked by `run.sh`:
 
-* `ci-crosscheck.sh` — a small, dependency-free agreement gate meant to run on
-  every push and fail fast. It overlaps in purpose with `crosstest.sh` and
-  defers to it for the exhaustive sweep.
 * `node-cli.js` — an adapter that drives `js/shavar.js` under Node, for Linux
-  CI runners where `jsc` does not exist.
+  CI runners where `jsc` does not exist. It is not a second implementation: it
+  loads `js/shavar.js` verbatim and only marshals argv and exit codes.
+
+There was briefly also a `ci-crosscheck.sh`, a small dependency-free agreement
+gate written before this harness existed. It has been deleted rather than kept
+alongside `crosstest.sh`: two scripts checking the same property is exactly how
+the two drift apart and start disagreeing about what "passing" means. CI now
+runs `nist.sh` and `run.sh fast`.
 
 ## Reading the summary table
 

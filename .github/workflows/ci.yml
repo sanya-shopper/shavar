@@ -188,8 +188,15 @@ jobs:
         # jsc is available on a Linux runner; tests/node-cli.js is a thin
         # adapter over the same unmodified js/shavar.js.
         run: node tests/node-cli.js selftest
-      - name: Cross-implementation trace agreement
-        run: bash tests/ci-crosscheck.sh
+      - name: NIST CAVP known-answer vectors (byte- and bit-oriented)
+        # 1154 vectors, 896 of which are NOT byte-aligned. These are the only
+        # external authority for sub-byte hashing: openssl, shasum and
+        # sha256sum can all only hash whole bytes. The .rsp files are
+        # committed, so this runs offline and is reproducible.
+        run: bash tests/nist.sh
+
+      - name: Cross-implementation agreement (digests and full traces)
+        run: bash tests/run.sh fast
 
   # ---------------------------------------------------------------- Lean
   lean:

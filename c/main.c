@@ -12,7 +12,7 @@
 #include "shavar.h"
 
 #include <stdio.h>
-#include <stdlib.h> /* getenv, atoi */
+#include <stdlib.h> /* getenv */
 #include <string.h>
 
 #define MSGMAX (1u << 20) /* 1 MiB, enough for the million-'a' vector */
@@ -64,6 +64,21 @@ static int parse_u64(const char *s, uint64_t *out) {
     return 0;
 }
 
+/* Parse the optional `rounds` argument. Returns 0 on success.
+ *
+ * The range 0..64 is enforced here rather than clamped in the library. An
+ * earlier version used atoi() and let shavar_compress() clamp, which meant
+ * `hash <msg> <n> 100` printed a perfectly good SHA-256 digest in answer to a
+ * request that means nothing -- output that looks authoritative and is not.
+ * Rejecting is the only honest response. See spec/CLI.md. */
+static int parse_rounds(const char *s, int *out) {
+    uint64_t v;
+    if (parse_u64(s, &v) != 0) return -1; /* also rejects "-1" and "12x" */
+    if (v > (uint64_t)SHAVAR_ROUNDS) return -1;
+    *out = (int)v;
+    return 0;
+}
+
 /* Check that hex byte count and bit count agree: nbytes == ceil(nbits/8). */
 static int lengths_agree(long nbytes, uint64_t nbits) {
     uint64_t need = nbits / 8u + ((nbits % 8u) ? 1u : 0u);
@@ -92,7 +107,10 @@ static int cmd_hash(const char *hex, const char *bits, const char *roundstr) {
                 (unsigned long long)nbits);
         return 2;
     }
-    if (roundstr) rounds = atoi(roundstr);
+    if (roundstr && parse_rounds(roundstr, &rounds) != 0) {
+        fprintf(stderr, "shavar: rounds must be 0..64, got '%s'\n", roundstr);
+        return 2;
+    }
 
     if (shavar_hash_ex(g_msg, nbits, shavar_iv, rounds, digest) != 0) {
         fprintf(stderr, "shavar: nonzero trailing bits in final byte\n");
@@ -124,7 +142,10 @@ static int cmd_trace(const char *hex, const char *bits, const char *idxstr,
         fprintf(stderr, "shavar: bad block index\n");
         return 2;
     }
-    if (roundstr) rounds = atoi(roundstr);
+    if (roundstr && parse_rounds(roundstr, &rounds) != 0) {
+        fprintf(stderr, "shavar: rounds must be 0..64, got '%s'\n", roundstr);
+        return 2;
+    }
 
     nblocks = shavar_padded_blocks(nbits);
     if (idx >= nblocks) {

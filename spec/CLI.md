@@ -35,9 +35,27 @@ Examples: `abc` as 24 bits is `616263 24`. The 5-bit string `10110` is
 Print the digest as **64 lowercase hex digits followed by a single newline**,
 and nothing else.
 
-`rounds` defaults to 64. A smaller value runs a reduced-round variant of the
-compression function in every block; this is not SHA-256 and is provided for
-cryptanalysis only.
+`rounds` defaults to 64 and **must lie in `0 … 64` inclusive**. A smaller value
+runs a reduced-round variant of the compression function in every block; this
+is not SHA-256 and is provided for cryptanalysis only.
+
+- `rounds = 0` is **legal**, not an error. It is the degenerate case in which
+  no round runs and the block contributes only its feed-forward: the outgoing
+  chaining value is the incoming one added to the seed window. It is worth
+  having because it isolates the seeding and feed-forward logic from the round
+  function entirely, which is a useful thing to be able to test on its own.
+- `rounds > 64` is an **error**: exit 2. It must *not* be silently clamped to
+  64. Clamping would make `hash <msg> <n> 100` print a correct-looking SHA-256
+  digest in response to a request that does not mean anything, which is the
+  kind of confidently wrong output this project exists not to produce.
+- A negative or non-numeric `rounds` is likewise exit 2.
+
+This paragraph was written after the fact, having discovered that the
+implementations disagreed here: one rejected `rounds = 0` and one clamped
+`rounds > 64`. Both behaviours were defensible readings of a specification
+that simply did not say. Recorded rather than quietly fixed, because the
+useful lesson is that an unstated boundary is where independent
+implementations diverge.
 
 ### `trace <hex> <nbits> [blockidx] [rounds]`
 

@@ -227,8 +227,10 @@ var ARGV = (typeof arguments === "undefined")
   function parseRounds(text) {
     if (text === undefined) return S.ROUNDS;
     const r = parseCount(text, "rounds");
-    if (r < 1 || r > S.ROUNDS) {
-      warn(`shavar: rounds must be in 1..${S.ROUNDS}, got ${r}`);
+    // 0 is legal: it is the degenerate "feed-forward only" case. See
+    // spec/CLI.md, which fixes the range at 0..64 inclusive.
+    if (r < 0 || r > S.ROUNDS) {
+      warn(`shavar: rounds must be in 0..${S.ROUNDS}, got ${r}`);
       finish(2);
     }
     return r;

@@ -4,3 +4,12 @@
 # Editor backups
 *~
 *.swp
+
+# C build outputs
+c/*.o
+c/*.a
+c/*.dylib
+c/*.so
+c/shavar
+c/shavar-shared
+c/*.plist

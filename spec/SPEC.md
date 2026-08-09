@@ -1,0 +1,345 @@
+# shavar — normative specification
+
+This is the single source of truth that all seven implementations follow —
+C99, Lean 4, Python 3, Perl 5, R7RS Scheme, JavaScript, and shell. Where an
+implementation disagrees with this document, the implementation is wrong.
+
+The algorithm is SHA-256 exactly as defined in FIPS 180-4. Nothing here changes
+what the function computes. What changes is *how it is written down*: the
+standard presents the compression function as eight registers that shuffle on
+every round, and this document presents it as two coupled recurrences with a
+lookback of four. The two are provably the same, and that proof is mechanised
+in `lean/` (see `Shavar/Equiv.lean`).
+
+---
+
+## 1. Notation
+
+All arithmetic is on 32-bit words unless stated otherwise.
+
+| Symbol | Meaning |
+| --- | --- |
+| `x ⊕ y` | bitwise exclusive or |
+| `x ∧ y`, `x ∨ y`, `¬x` | bitwise and, or, not |
+| `x ⊞ y` | addition modulo 2³² |
+| `ROTR^n(x)` | circular right rotation by `n` |
+| `SHR^n(x)` | logical right shift by `n`, zero-filled |
+| `W[t]` | word `t` of the message schedule, `0 ≤ t < 64` |
+| `L` | message length **in bits** — an arbitrary non-negative integer |
+
+Bit order is big-endian throughout, matching FIPS 180-4: within a byte the
+most significant bit comes first, and within a word the most significant byte
+comes first. This matters for sub-byte message lengths (§5).
+
+### 1.1 Round functions
+
+The six auxiliary functions are:
+
+```
+Ch(x, y, z)  = (x ∧ y) ⊕ (¬x ∧ z)
+Maj(x, y, z) = (x ∧ y) ⊕ (x ∧ z) ⊕ (y ∧ z)
+
+Σ0(x) = ROTR^2(x)  ⊕ ROTR^13(x) ⊕ ROTR^22(x)
+Σ1(x) = ROTR^6(x)  ⊕ ROTR^11(x) ⊕ ROTR^25(x)
+σ0(x) = ROTR^7(x)  ⊕ ROTR^18(x) ⊕ SHR^3(x)
+σ1(x) = ROTR^17(x) ⊕ ROTR^19(x) ⊕ SHR^10(x)
+```
+
+`Ch` is "choose": bit `i` of `x` selects between bit `i` of `y` and of `z`.
+`Maj` is "majority": bit `i` is whichever value appears at least twice among
+the three inputs. The capital-sigma functions are used on the state, the
+lowercase-sigma functions on the message schedule.
+
+Read `Σ` and `σ` as *Sigma* and *sigma*; they are unrelated to summation.
+
+---
+
+## 2. The standard eight-register form
+
+FIPS 180-4 keeps eight working variables `a…h` and, for `t = 0 … 63`:
+
+```
+T1 = h ⊞ Σ1(e) ⊞ Ch(e,f,g) ⊞ K[t] ⊞ W[t]
+T2 = Σ0(a) ⊞ Maj(a,b,c)
+h = g;  g = f;  f = e;  e = d ⊞ T1
+d = c;  c = b;  b = a;  a = T1 ⊞ T2
+```
+
+Six of those eight assignments are pure copies. Only `a` and `e` are computed.
+That observation is the whole of §3.
+
+---
+
+## 3. The two-dimensional form with lookback 4
+
+Define two sequences of 32-bit words, `A[t]` and `E[t]`, indexed from `t = -4`.
+Seed them from the incoming chaining value `H[0…7]`:
+
+```
+A[-1] = H[0]    A[-2] = H[1]    A[-3] = H[2]    A[-4] = H[3]
+E[-1] = H[4]    E[-2] = H[5]    E[-3] = H[6]    E[-4] = H[7]
+```
+
+Then for `t = 0 … 63`:
+
+```
+T1[t] = E[t-4] ⊞ Σ1(E[t-1]) ⊞ Ch(E[t-1], E[t-2], E[t-3]) ⊞ K[t] ⊞ W[t]
+T2[t] = Σ0(A[t-1]) ⊞ Maj(A[t-1], A[t-2], A[t-3])
+
+E[t]  = A[t-4] ⊞ T1[t]
+A[t]  = T1[t] ⊞ T2[t]
+```
+
+and the outgoing chaining value is
+
+```
+H[0] ⊞= A[63]   H[1] ⊞= A[62]   H[2] ⊞= A[61]   H[3] ⊞= A[60]
+H[4] ⊞= E[63]   H[5] ⊞= E[62]   H[6] ⊞= E[61]   H[7] ⊞= E[60]
+```
+
+**Why these are the same.** The eight registers are not eight independent
+things; they are two sliding windows of width four over the histories of `A`
+and `E`. At the top of round `t` the correspondence is exactly:
+
+```
+a = A[t-1]   b = A[t-2]   c = A[t-3]   d = A[t-4]
+e = E[t-1]   f = E[t-2]   g = E[t-3]   h = E[t-4]
+```
+
+Substituting that into §2 turns the six copy-assignments into nothing at all —
+they are the window sliding — and the two real assignments into the two
+recurrences above. The register shuffle was never computation; it was an
+artefact of writing a recurrence with an explicit shift register.
+
+This is the form every implementation in this repository uses. It is preferred
+here for three reasons:
+
+1. **It is smaller.** Two recurrences instead of eight assignments, and the
+   round body is four lines with no permutation to get wrong.
+2. **It is the natural object of study.** Differential and algebraic attacks
+   on SHA-256 reason about the sequences `A[t]` and `E[t]` and their
+   differences, not about register names. See §7.
+3. **It keeps the whole history.** `A[-4…63]` and `E[-4…63]` are 136 words;
+   retaining them costs 544 bytes and makes every intermediate value of the
+   compression addressable after the fact. See §6.
+
+### 3.1 Dependency depth
+
+`A[t]` depends on `A[t-1..t-4]` and `E[t-1..t-4]`; `E[t]` depends on
+`A[t-4]` and `E[t-1..t-4]`. Both are order-4. Note the asymmetry worth
+remembering: `E` reaches into the `A` history at exactly one point, `A[t-4]`,
+and `A` reaches into the `E` history at four points. The two tracks are not
+symmetric, and the single `A[t-4]` term is the only path by which the `A`
+track influences the `E` track at all.
+
+---
+
+## 4. The message schedule as an order-16 recurrence
+
+The schedule has the same shape one dimension down. For a 512-bit block split
+into sixteen big-endian words `M[0…15]`:
+
+```
+W[t] = M[t]                                                    0 ≤ t < 16
+W[t] = σ1(W[t-2]) ⊞ W[t-7] ⊞ σ0(W[t-15]) ⊞ W[t-16]            16 ≤ t < 64
+```
+
+So the whole of SHA-256 is one linear-feedback-shaped order-16 recurrence
+(`W`) driving a nonlinear order-4 recurrence in two tracks (`A`, `E`). That
+two-sentence description is the entire algorithm, and it is the framing this
+repository is built around.
+
+`W` is worth isolating because it is **`GF(2)`-linear apart from its three
+additions**. `σ0` and `σ1` are `⊕` of rotations and shifts, hence linear over
+`GF(2)`; only the `⊞` carries break linearity. Message-modification attacks
+exploit precisely this.
+
+---
+
+## 5. Padding for arbitrary bit length
+
+`L` is a bit count, not a byte count, and may be any non-negative integer —
+including values that are not multiples of 8. This is required by FIPS 180-4
+and is where most hobby implementations quietly do the wrong thing.
+
+Append to the message:
+
+1. a single `1` bit;
+2. `k` zero bits, where `k` is the smallest non-negative solution of
+   `L + 1 + k ≡ 448 (mod 512)`;
+3. `L` itself as a 64-bit big-endian integer.
+
+The result has length `L + 1 + k + 64 ≡ 0 (mod 512)`.
+
+### 5.1 Representation convention
+
+Every implementation here takes a message as **a byte buffer plus a bit count
+`L`**. The buffer holds `⌈L/8⌉` bytes. When `L` is not a multiple of 8, the
+final byte holds its `L mod 8` significant bits **in the high-order positions**,
+and the remaining low-order bits of that byte *must be zero*.
+
+Implementations reject a final byte with nonzero padding bits rather than
+silently masking, because silently masking makes two distinct inputs hash the
+same and would hide caller bugs.
+
+So the `1` bit of step 1 lands at bit offset `L`, which is bit `7 - (L mod 8)`
+of byte `⌊L/8⌋`, counting bit 7 as the most significant.
+
+### 5.2 Worked example
+
+For `L = 5` and the five bits `10110`:
+
+- buffer is one byte `0b10110000` = `0xB0`;
+- the appended `1` bit goes at position 5, giving `0b10110100` = `0xB4`;
+- zeros fill to bit 448, then the 64-bit big-endian value `5` ends the block.
+
+`L = 0` is legal: the padded message is a single block of `0x80` followed by
+63 zero bytes, and the digest is the well-known
+`e3b0c442 98fc1c14 9afbf4c8 996fb924 27ae41e4 649b934c a495991b 7852b855`.
+
+### 5.3 Why padding must be injective
+
+The Merkle–Damgård security argument needs `pad` to be injective: if two
+distinct messages padded to the same bit string, a collision would exist for
+trivial reasons having nothing to do with the compression function. Encoding
+`L` in the final 64 bits is what buys injectivity, and `lean/` proves it
+(§8).
+
+Note the standard's implicit bound: `L < 2⁶⁴`. Implementations here carry `L`
+as a 64-bit count and document the bound rather than pretending it is absent.
+
+---
+
+## 6. What implementations must expose
+
+To be useful for research (§7) rather than only for hashing, every
+implementation in this repository exposes the same three operations. Uniformity
+is what makes the cross-testing harness possible: any implementation can be
+checked against any other, round by round.
+
+- **`hash <hex> <nbits>`** — digest of the message given as hex bytes plus a
+  bit length. Prints 64 lowercase hex characters.
+- **`trace <hex> <nbits> [block]`** — the full interior of one block's
+  compression: `W[0…63]`, `A[-4…63]`, `E[-4…63]`, and `T1[t]`, `T2[t]` for
+  every round, as tab-separated hex.
+- **`selftest`** — run the built-in known-answer vectors, exit nonzero on
+  failure.
+
+Beyond the CLI, each implementation offers the compression function on a
+**caller-supplied chaining value** and for a **reduced number of rounds**.
+Neither is reachable through a normal hashing API, and both are indispensable:
+free-start (chosen-IV) attacks and reduced-round distinguishers are the bread
+and butter of hash cryptanalysis, and a library that only ever starts from the
+FIPS initial value cannot express them.
+
+---
+
+## 7. Notes for cryptanalytic use
+
+Three structural facts that the 2D form makes visible, recorded here because
+they determine what the code needs to expose.
+
+### 7.1 The linear/nonlinear split
+
+Partition the operations by behaviour over `GF(2)`:
+
+| Linear over `GF(2)` | Nonlinear |
+| --- | --- |
+| `⊕`, `ROTR`, `SHR` | `⊞` (via carries) |
+| hence `Σ0, Σ1, σ0, σ1` | `Ch`, `Maj` |
+
+If `⊞` were replaced by `⊕` and `Ch`/`Maj` by linear functions, SHA-256 would
+collapse into an affine map over `GF(2)^256` and be broken by linear algebra
+alone. All of its strength sits in the carry chains and in the two bitwise
+selectors. The implementations therefore keep `Ch`, `Maj`, and each `⊞`
+separately addressable rather than fusing them into one expression.
+
+### 7.2 Bit-slices are coupled only by carries
+
+`Ch`, `Maj`, and `⊕` all act bit-position-wise: bit `i` of the output depends
+only on bit `i` of the inputs. Rotations permute bit positions but do not mix
+them. **The only operation that moves information from bit `i` to bit `j > i`
+is the carry in `⊞`.**
+
+Consequently, if every `⊞` were replaced by `⊕`, SHA-256 would decompose into
+32 completely independent 1-bit ciphers. Carry propagation is the sole
+mechanism of diffusion across the word, and it is directional — carries move
+towards the most significant bit only. This asymmetry is the reason low-order
+bit differences are cheap to control and high-order ones are not, which is why
+published differential paths concentrate their differences in the low bits.
+
+### 7.3 Differences and the trace
+
+For differential work, what is wanted is not a digest but the pair of traces
+for two related messages and their difference. The harness computes, for
+messages `M` and `M'`:
+
+```
+ΔW[t] = W[t] ⊕ W'[t]      ΔA[t] = A[t] ⊕ A'[t]      ΔE[t] = E[t] ⊕ E'[t]
+```
+
+together with the Hamming weight of each, which is the usual first diagnostic
+for whether a path is behaving. Modular differences (`A[t] ⊟ A'[t]`) are also
+reported, since signed-difference paths are stated that way in the literature
+and the two notions diverge exactly where carries fire.
+
+---
+
+## 8. Verification obligations
+
+What "correct" means here, and how each claim is discharged. The point of
+listing these separately is that they are different kinds of claim needing
+different kinds of evidence.
+
+| # | Claim | How it is established |
+| --- | --- | --- |
+| V1 | The 2D recurrence equals the 8-register form, for one round and hence for 64 | Machine-checked in Lean (`Shavar/Equiv.lean`) |
+| V2 | `Ch`/`Maj` identities used for optimisation are sound | `bv_decide` — bit-blasted to SAT, LRAT certificate checked by the Lean kernel |
+| V3 | Padding lands on a 512-bit multiple, for every `L` | Lean, by arithmetic on `L mod 512` |
+| V4 | Padding is injective | Lean |
+| V5 | The implementations agree with FIPS 180-4 | NIST CAVP known-answer vectors, byte- and bit-oriented |
+| V6 | The implementations agree with **each other** | Cross-testing on digests *and* on per-round traces, over a swept corpus of bit lengths |
+
+V5 and V6 answer different questions. V5 catches a shared misreading of the
+standard; V6 catches a transcription slip in one language, and because it
+compares traces it names the round where the slip happened. Neither subsumes
+the other: seven implementations could agree with each other and all be wrong,
+or all match NIST on byte-aligned input and diverge on `L = 5`.
+
+A caveat stated plainly: `bv_decide` discharges goals by bit-blasting to
+CaDiCaL and checking the returned LRAT certificate inside Lean. The SAT solver
+is *not* trusted — but the tactic uses the `Lean.ofReduceBool` axiom, which
+places the Lean compiler in the trusted computing base. Proofs here are
+therefore machine-checked modulo the compiler, not modulo the kernel alone.
+That is a weaker guarantee than a kernel-only proof and is flagged wherever it
+is relied on.
+
+---
+
+## 9. Constants
+
+Initial chaining value `H[0…7]` — the first 32 bits of the fractional parts of
+the square roots of the first eight primes:
+
+```
+6a09e667 bb67ae85 3c6ef372 a54ff53a 510e527f 9b05688c 1f83d9ab 5be0cd19
+```
+
+Round constants `K[0…63]` — the first 32 bits of the fractional parts of the
+cube roots of the first sixty-four primes:
+
+```
+428a2f98 71374491 b5c0fbcf e9b5dba5 3956c25b 59f111f1 923f82a4 ab1c5ed5
+d807aa98 12835b01 243185be 550c7dc3 72be5d74 80deb1fe 9bdc06a7 c19bf174
+e49b69c1 efbe4786 0fc19dc6 240ca1cc 2de92c6f 4a7484aa 5cb0a9dc 76f988da
+983e5152 a831c66d b00327c8 bf597fc7 c6e00bf3 d5a79147 06ca6351 14292967
+27b70a85 2e1b2138 4d2c6dfc 53380d13 650a7354 766a0abb 81c2c92e 92722c85
+a2bfe8a1 a81a664b c24b8b70 c76c51a3 d192e819 d6990624 f40e3585 106aa070
+19a4c116 1e376c08 2748774c 34b0bcb5 391c0cb3 4ed8aa4a 5b9cca4f 682e6ff3
+748f82ee 78a5636f 84c87814 8cc70208 90befffa a4506ceb bef9a3f7 c67178f2
+```
+
+Both derivations are checkable, and `tests/` recomputes them from the primes
+rather than trusting the transcription above. A mistyped constant is the
+classic way one of five implementations ends up subtly different from the
+other four, and it is cheap to rule out.

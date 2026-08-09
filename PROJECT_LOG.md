@@ -52,11 +52,13 @@ random bit lengths, cross-checking implementations against each other and
 against the preinstalled OpenSSL; and a brief PDF on where each language makes
 this natural or hard.
 
-**The unifying image the user offered**, which is a good one and worth
-designing toward: *a blend between a debugger and a video game for SHA-256
-nerds*. The Safari page is where that lands — round-by-round stepping, the two
-tracks with the order-4 window highlighted, bit-level rendering, and a diff
-mode that shows a one-bit input difference avalanching across 64 rounds.
+**The Safari page is scoped as an interactive explorer**, not a demo: it does
+round-by-round stepping forwards and backwards, draws the two tracks with the
+order-4 window highlighted, renders words as individual bits, and has a diff
+mode showing a one-bit input difference avalanching across 64 rounds. The
+justification is the same one that motivates keeping the whole trace at all
+(above) — the intended reader is studying the function, and the interior is
+the thing worth seeing.
 
 ### Decisions taken
 

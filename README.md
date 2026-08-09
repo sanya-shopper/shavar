@@ -81,7 +81,7 @@ and reduced-round analysis.
 
 ## Correctness
 
-Verified in CI on every push (44 jobs):
+Verified in CI on every push (45 jobs):
 
 - **1154 NIST CAVP vectors, 896 of them not byte-aligned.** Committed, so the
   suite runs offline.

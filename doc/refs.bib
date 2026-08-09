@@ -1,0 +1,73 @@
+% shavar bibliography.
+%
+% Per the project convention, every entry records whether a local copy exists
+% in refs/ and, if so, its path and retrieval date. Entries without a local
+% copy say so explicitly rather than leaving the reader to discover it.
+
+@techreport{fips180-4,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Secure Hash Standard (SHS)},
+  number      = {FIPS PUB 180-4},
+  institution = {U.S. Department of Commerce},
+  year        = {2015},
+  month       = {8},
+  doi         = {10.6028/NIST.FIPS.180-4},
+  url         = {https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf},
+  note        = {Local copy: \path{refs/fips180-4.pdf}, retrieved 2026-08-09
+                 from nvlpubs.nist.gov. Identity confirmed from the PDF's own
+                 XMP metadata (\emph{Secure Hash Standard}).},
+}
+
+@article{appel2015sha,
+  author  = {Appel, Andrew W.},
+  title   = {Verification of a Cryptographic Primitive: {SHA-256}},
+  journal = {ACM Transactions on Programming Languages and Systems},
+  volume  = {37},
+  number  = {2},
+  pages   = {7:1--7:31},
+  year    = {2015},
+  doi     = {10.1145/2701415},
+  url     = {https://www.cs.princeton.edu/~appel/papers/verif-sha.pdf},
+  note    = {Local copy: \path{refs/appel-verif-sha256.pdf}, retrieved
+             2026-08-09 from the author's page at Princeton.},
+}
+
+@book{r7rs,
+  author    = {Shinn, Alex and Cowan, John and Gleckler, Arthur A.},
+  title     = {Revised$^7$ Report on the Algorithmic Language Scheme},
+  year      = {2013},
+  url       = {https://small.r7rs.org/attachment/r7rs.pdf},
+  note      = {Local copy: \path{refs/r7rs.pdf}, retrieved 2026-08-09 from
+               small.r7rs.org. Cited here for the absence of any bitwise
+               operation in the R7RS-small base library.},
+}
+
+@article{boving2025bvdecide,
+  author  = {B{\"o}ving, Henrik and Bhat, Siddharth and Cicolini, Luisa and
+             Keizer, Alex C. and Fr{\'e}not, L{\'e}on and Mohamed, Abdalrhman
+             and Stefanesco, L{\'e}o and Khan, Harun and Clune, Joshua and
+             Barrett, Clark W. and Grosser, Tobias},
+  title   = {Interactive Bitvector Reasoning using Verified Bit-Blasting},
+  journal = {Proceedings of the ACM on Programming Languages},
+  volume  = {9},
+  number  = {OOPSLA2},
+  pages   = {3259--3285},
+  year    = {2025},
+  doi     = {10.1145/3763167},
+  note    = {\textbf{No local copy}: the ACM Digital Library version could not
+             be retrieved automatically on 2026-08-09. Bibliographic details
+             verified against the ACM DL listing; the paper describes
+             \texttt{bv\_decide}, the tactic used throughout \path{lean/}.},
+}
+
+@misc{nistcavp,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Cryptographic Algorithm Validation Program: Secure Hashing
+                  Test Vectors (byte-oriented and bit-oriented)},
+  howpublished = {CAVP, {SHAVS}},
+  year         = {2026},
+  url          = {https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/secure-hashing},
+  note         = {The bit-oriented set is the only authoritative external
+                  reference for hashing messages whose length is not a
+                  multiple of eight. See \S\ref{sec:verification}.},
+}

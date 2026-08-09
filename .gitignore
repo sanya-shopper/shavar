@@ -16,3 +16,18 @@ c/*.plist
 
 # Lean build outputs
 lean/.lake/
+
+# LaTeX intermediates. The .tex and refs.bib are source; shavar.pdf is a
+# tested build output and IS committed so the document can be read without
+# a TeX installation.
+doc/*.aux
+doc/*.log
+doc/*.out
+doc/*.toc
+doc/*.bbl
+doc/*.bcf
+doc/*.blg
+doc/*.fls
+doc/*.fdb_latexmk
+doc/*.run.xml
+doc/*.synctex.gz

@@ -79,14 +79,25 @@ if [ "$have_tangle" = 1 ]; then
 hdr "tangle: does ctangle produce the same program as ../c ?"
 # ===========================================================================
 
+# Both ctangle and cweave report a problem in two ways: a nonzero exit and a
+# line beginning with `!`.  Neither the banner nor the cheerful
+# "(No errors were found.)" can be relied on -- CWEB 4.8 as packaged for
+# Debian prints nothing at all when its output is not a terminal, while 4.12
+# from MacTeX prints both -- so the check is on the exit status and on the
+# absence of complaints, which every version agrees about.
+web_ran_clean() { # web_ran_clean LABEL RC LOGFILE
+  if [ "$2" = 0 ] && ! grep -qE '^!|Pardon me' "$3"; then
+    pass "$1"
+  else
+    fail "$1"
+    if [ -s "$3" ]; then sed 's/^/    /' "$3" | head -20
+    else echo "    (exit $2, no diagnostic output)"; fi
+  fi
+}
+
 rm -f shavar-cweb.c shavar.h main.c
-if ctangle shavar-cweb.w > "$TMP/ctangle.log" 2>&1 &&
-   grep -q "No errors were found" "$TMP/ctangle.log"; then
-  pass "ctangle runs clean"
-else
-  fail "ctangle runs clean"
-  sed 's/^/    /' "$TMP/ctangle.log" | head -20
-fi
+ctangle shavar-cweb.w > "$TMP/ctangle.log" 2>&1
+web_ran_clean "ctangle runs clean" "$?" "$TMP/ctangle.log"
 
 for f in shavar-cweb.c shavar.h main.c; do
   if [ -s "$f" ]; then pass "tangled $f"; else fail "tangled $f"; fi
@@ -322,13 +333,8 @@ hdr "weave: is the document sound?"
 rm -f shavar-cweb.tex shavar-cweb.idx shavar-cweb.scn shavar-cweb.toc \
       shavar-cweb.lbl shavar-cweb.pdf
 
-if cweave shavar-cweb.w > "$TMP/cweave.log" 2>&1 &&
-   grep -q "No errors were found" "$TMP/cweave.log"; then
-  pass "cweave runs clean"
-else
-  fail "cweave runs clean"
-  sed 's/^/    /' "$TMP/cweave.log" | head -20
-fi
+cweave shavar-cweb.w > "$TMP/cweave.log" 2>&1
+web_ran_clean "cweave runs clean" "$?" "$TMP/cweave.log"
 
 # cweave reports a section that is referenced but never defined, or defined
 # and never used, as a warning rather than as a nonzero exit.  Those are the

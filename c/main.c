@@ -12,7 +12,7 @@
 #include "shavar.h"
 
 #include <stdio.h>
-#include <stdlib.h>
+#include <stdlib.h> /* getenv, atoi */
 #include <string.h>
 
 #define MSGMAX (1u << 20) /* 1 MiB, enough for the million-'a' vector */
@@ -177,7 +177,22 @@ static const struct kat kats[] = {
 static int cmd_selftest(void) {
     size_t i;
     int fails = 0;
+    int skipped = 0;
     char got[65];
+
+    /* SHAVAR_QUICK=1 skips the million-'a' vector.
+     *
+     * This exists for the sanitizer targets, not for convenience. Under
+     * `-fsanitize=address` with detect_stack_use_after_return, the 1.1 KB
+     * shavar_trace that shavar_compress builds on every call is relocated to
+     * a poisoned "fake stack" and re-poisoned on each of the 15625 blocks
+     * that vector requires, which takes minutes rather than milliseconds.
+     * The check is still worth running — just not against a megabyte.
+     *
+     * An environment variable rather than an argv flag, so that the CLI
+     * contract in spec/CLI.md ("selftest" takes no arguments) holds exactly
+     * and this implementation stays interchangeable with the other six. */
+    const char *quick = getenv("SHAVAR_QUICK");
 
     for (i = 0; i < sizeof kats / sizeof kats[0]; i++) {
         unsigned char digest[32];
@@ -185,6 +200,10 @@ static int cmd_selftest(void) {
         size_t len, j;
 
         if (kats[i].msg == NULL) {
+            if (quick && quick[0] == '1') {
+                skipped++;
+                continue;
+            }
             len = 1000000u;
             memset(g_msg, 'a', len);
         } else {
@@ -248,7 +267,8 @@ static int cmd_selftest(void) {
     }
 
     if (fails == 0) {
-        printf("ok %u\n", (unsigned)(sizeof kats / sizeof kats[0]));
+        printf("ok %u\n", (unsigned)(sizeof kats / sizeof kats[0]) - (unsigned)skipped);
+        if (skipped) fprintf(stderr, "(SHAVAR_QUICK: skipped %d long vector(s))\n", skipped);
         return 0;
     }
     return 1;

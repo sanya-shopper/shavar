@@ -58,7 +58,20 @@ HOUT   <i>   <hex8>      i = 0..7      chaining value leaving the block
 ```
 
 `<hex8>` is exactly 8 lowercase hex digits, zero-padded. `<t>` is a decimal
-integer, negative values written with a leading `-` (e.g. `A\t-4\t6a09e667`).
+integer, negative values written with a leading `-`.
+
+The first `A` record of a from-the-IV trace is therefore:
+
+```
+A	-4	a54ff53a
+```
+
+Note that this is `H[3]`, not `H[0]`. SPEC.md §3 seeds the window in reverse —
+`A[-1] = H[0]`, `A[-2] = H[1]`, `A[-3] = H[2]`, `A[-4] = H[3]` — because the
+correspondence being encoded is `a = A[t-1], b = A[t-2], c = A[t-3],
+d = A[t-4]` read at `t = 0`. The more negative the index, the later the `H`.
+Getting this backwards produces wrong digests immediately, so it is called out
+here rather than left to be inferred.
 
 When `rounds < 64`, emit `W` for all 64 entries (the schedule is independent
 of the round count), but `A`/`E` only for `t = -4 .. rounds-1`, and `T1`/`T2`

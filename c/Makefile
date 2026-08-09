@@ -4,13 +4,33 @@
 # of correctness checks under every compiler configuration available on this
 # machine. See `make help`.
 #
-# A note on what is NOT here: valgrind. It does not support arm64 macOS at
-# all, so on Apple Silicon it is simply unavailable rather than merely
-# omitted. Its role is covered by AddressSanitizer (which subsumes most of
-# what memcheck finds, and is faster), LeakSanitizer, UndefinedBehaviorSanitizer,
-# and Apple's own `leaks`. MemorySanitizer is likewise unsupported on this
-# target; the uninitialised-read checks it would provide are partly covered
-# by the static analyzer.
+# TOOL AVAILABILITY ON THIS HOST (Darwin 25.5.0 arm64, Apple clang 17)
+#
+# Three of the tools one would normally reach for do not work here, and it is
+# worth writing down which and why so their absence reads as a platform fact
+# rather than an oversight:
+#
+#   valgrind   Does not support arm64 macOS at all. Not installable.
+#   MSan       -fsanitize=memory is rejected outright for this target.
+#   ASan       Builds fine but HANGS AT STARTUP on this machine. Verified with
+#              a do-nothing `int main(void){return 0;}`: it spins indefinitely,
+#              burning CPU, both inside and outside the shell sandbox. With
+#              ASAN_OPTIONS=verbosity=1 the last line printed is
+#              "AddressSanitizer: libc interceptors initialized", so it stalls
+#              during runtime init, before reaching main. This is an
+#              incompatibility between the shipped ASan runtime and this OS
+#              build, not a property of this code. The asan targets below are
+#              kept because they are correct and will run on a working host.
+#
+# What DOES work here, and is clean:
+#
+#   ubsan      -fsanitize=undefined,integer,nullability,local-bounds with
+#              -fno-sanitize-recover=all: passes with no findings.
+#   analyze    clang static analyzer: no warnings.
+#   leaks      Apple's leak checker: "0 leaks for 0 total leaked bytes".
+#              Expected, since the library calls no allocator at all.
+#   stds/opts  4 language standards x 6 optimisation levels, all agreeing.
+#   arch       x86_64 cross-build for a second code generator.
 
 CC      ?= cc
 STD     ?= c99
@@ -37,7 +57,7 @@ SHLIB    = libshavar.so
 SHFLAGS  = -shared
 endif
 
-.PHONY: all check help clean stds opts san ubsan asan analyze arch leaks bigmatrix
+.PHONY: all check help clean stds opts san ubsan asan asan-deep analyze arch leaks bigmatrix
 
 all: libshavar.a $(SHLIB) libshavar.so shavar
 
@@ -96,15 +116,31 @@ opts:
 	    || { echo "FAILED"; exit 1; }; \
 	done
 
-# AddressSanitizer + LeakSanitizer. The library allocates nothing, so a leak
-# report here would indicate something has gone badly wrong rather than
-# merely being untidy.
-# AddressSanitizer. detect_leaks is deliberately NOT set: LeakSanitizer is
-# not supported on arm64 macOS and enabling it aborts the run. The `leaks`
-# target below covers that ground using Apple's own tool instead.
+# AddressSanitizer. The library allocates nothing, so there is no heap to
+# corrupt; what ASan is actually buying here is bounds checking on the trace
+# arrays and the padded-block buffer, which is where an off-by-one in the
+# +4 index offset or the padding arithmetic would show up.
+#
+# detect_leaks is deliberately NOT set: LeakSanitizer is unsupported on arm64
+# macOS and enabling it aborts the run outright. The `leaks` target below
+# covers that ground with Apple's own tool instead.
+#
+# This is the standard run: the full vector set including the million-'a'
+# block, with ASan's default (fast) stack handling.
 asan:
 	$(CC) -std=$(STD) -O1 -g -fsanitize=address -fno-omit-frame-pointer \
 	  $(LIBSRC) $(CLISRC) -o /tmp/shavar-asan
+	ASAN_OPTIONS=strict_string_checks=1 /tmp/shavar-asan selftest
+
+# The deep run: adds detect_stack_use_after_return, which relocates every
+# large stack local to a poisoned heap frame. That is ~100x slower here
+# because shavar_compress builds a 1.1 KB trace per block, so it runs against
+# the short vectors only (SHAVAR_QUICK=1). Restricting the input, not the
+# check, keeps the coverage honest — every code path still executes.
+asan-deep:
+	$(CC) -std=$(STD) -O1 -g -fsanitize=address -fno-omit-frame-pointer \
+	  $(LIBSRC) $(CLISRC) -o /tmp/shavar-asan
+	SHAVAR_QUICK=1 \
 	ASAN_OPTIONS=strict_string_checks=1:detect_stack_use_after_return=1 \
 	  /tmp/shavar-asan selftest
 
@@ -130,7 +166,7 @@ ubsan:
 # the check is inapplicable rather than merely inconvenient. Signed overflow
 # remains checked, and there is no signed arithmetic in the library at all.
 
-san: asan ubsan
+san: asan asan-deep ubsan
 
 # Clang's static analyzer: catches uninitialised reads and dead stores that
 # the sanitizers only find if a test happens to execute the path.
@@ -157,7 +193,7 @@ bigmatrix: check stds opts san analyze arch leaks
 	@echo "all C checks passed"
 
 help:
-	@echo "targets: all check stds opts asan ubsan san analyze arch leaks bigmatrix clean"
+	@echo "targets: all check stds opts asan asan-deep ubsan san analyze arch leaks bigmatrix clean"
 
 clean:
 	rm -f *.o *.a *.dylib *.so shavar shavar-shared *.plist

@@ -1,0 +1,99 @@
+/* shavar — SHA-256 written as a two-dimensional order-4 recurrence.
+ *
+ * See ../spec/SPEC.md. This header is the reference API; the other six
+ * implementations in this repository mirror its behaviour and are tested
+ * against it round by round.
+ *
+ * Portable C99: no compiler extensions, no POSIX, no libraries beyond
+ * <stdint.h>, <stddef.h> and <string.h>. Nothing here depends on the host's
+ * endianness, word size, or signed-shift behaviour.
+ */
+#ifndef SHAVAR_H
+#define SHAVAR_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#define SHAVAR_ROUNDS 64 /* full SHA-256; reduce for cryptanalysis */
+#define SHAVAR_DIGEST_BYTES 32
+#define SHAVAR_BLOCK_BYTES 64
+
+/* A complete record of one block's compression.
+ *
+ * The arrays are offset by 4 so that index [4 + t] holds element t of the
+ * spec's sequence, and t may run from -4. Use the accessors below rather
+ * than open-coding the +4, which is the obvious place to introduce an
+ * off-by-one that the cross-tests would then have to find for you.
+ *
+ * 544 bytes of A/E history per block is deliberate: retaining the whole
+ * trajectory is what makes the implementation usable for the differential
+ * work described in SPEC.md §7, and it costs nothing worth saving. */
+typedef struct {
+    uint32_t A[4 + SHAVAR_ROUNDS]; /* A[-4 .. 63] */
+    uint32_t E[4 + SHAVAR_ROUNDS]; /* E[-4 .. 63] */
+    uint32_t W[SHAVAR_ROUNDS];     /* message schedule */
+    uint32_t T1[SHAVAR_ROUNDS];
+    uint32_t T2[SHAVAR_ROUNDS];
+    uint32_t h_in[8];  /* chaining value entering this block  */
+    uint32_t h_out[8]; /* chaining value leaving it           */
+    int rounds;        /* rounds actually run (<= SHAVAR_ROUNDS) */
+} shavar_trace;
+
+/* t ranges over [-4, rounds). */
+static inline uint32_t shavar_A(const shavar_trace *tr, int t) { return tr->A[4 + t]; }
+static inline uint32_t shavar_E(const shavar_trace *tr, int t) { return tr->E[4 + t]; }
+
+/* The FIPS 180-4 initial chaining value. */
+extern const uint32_t shavar_iv[8];
+extern const uint32_t shavar_k[64];
+
+/* ---- the six round functions, exposed individually ----------------------
+ *
+ * Kept separate rather than inlined into one expression because SPEC.md §7.1
+ * turns on which of them are GF(2)-linear: Sigma0/Sigma1/sigma0/sigma1 are,
+ * Ch and Maj are not. Research code needs to substitute or instrument them
+ * one at a time. */
+uint32_t shavar_ch(uint32_t x, uint32_t y, uint32_t z);
+uint32_t shavar_maj(uint32_t x, uint32_t y, uint32_t z);
+uint32_t shavar_Sigma0(uint32_t x);
+uint32_t shavar_Sigma1(uint32_t x);
+uint32_t shavar_sigma0(uint32_t x);
+uint32_t shavar_sigma1(uint32_t x);
+
+/* ---- compression --------------------------------------------------------
+ *
+ * Compress one 64-byte block into h[0..7], recording everything into *tr
+ * (which may be NULL if the trace is not wanted).
+ *
+ * `rounds` may be less than 64 to obtain a reduced-round variant, and `h`
+ * may be any chaining value rather than shavar_iv. Neither is reachable
+ * through a hashing API, and both are prerequisites for the free-start and
+ * reduced-round analyses that this repository exists to support. */
+void shavar_compress(uint32_t h[8], const unsigned char block[64], int rounds,
+                     shavar_trace *tr);
+
+/* ---- hashing ------------------------------------------------------------
+ *
+ * Hash `nbits` bits of `msg`. `msg` must hold ceil(nbits/8) bytes; when
+ * nbits is not a multiple of 8 the final byte carries its significant bits
+ * in the HIGH-order positions and its low-order bits must be zero.
+ *
+ * Returns 0 on success, -1 if those trailing bits are nonzero. Rejecting
+ * rather than masking is deliberate: masking would map two distinct inputs
+ * to one digest and hide the caller's bug. See SPEC.md §5.1. */
+int shavar_hash(const unsigned char *msg, uint64_t nbits,
+                unsigned char out[SHAVAR_DIGEST_BYTES]);
+
+/* As above, from a caller-chosen IV and round count. */
+int shavar_hash_ex(const unsigned char *msg, uint64_t nbits, const uint32_t iv[8],
+                   int rounds, unsigned char out[SHAVAR_DIGEST_BYTES]);
+
+/* Number of 512-bit blocks the padded message occupies. */
+uint64_t shavar_padded_blocks(uint64_t nbits);
+
+/* Write block number `idx` of the padded message into `out`. This is what
+ * lets a caller walk the padded stream without materialising it. */
+int shavar_padded_block(const unsigned char *msg, uint64_t nbits, uint64_t idx,
+                        unsigned char out[64]);
+
+#endif /* SHAVAR_H */

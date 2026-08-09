@@ -126,6 +126,50 @@ mode that shows a one-bit input difference avalanching across 64 rounds.
   standards and six optimisation levels all agree; the x86_64 cross-build
   compiles, though Rosetta 2 is not installed so it cannot be executed here.
 
+### CI closed every gap the laptop could not reach
+
+Pushed to `github.com/sanya-shopper/shavar` and wired up GitHub Actions. The
+point was never redundancy with local testing; it was to reach what a
+macOS/arm64 machine physically cannot. **44 jobs, all green**, and three
+results are worth recording specifically:
+
+- **valgrind: 0 errors from 0 contexts**, on the hashing, tracing and
+  rejection paths, with "All heap blocks were freed — no leaks are possible".
+  This tool does not exist on Apple Silicon, so it had never run before.
+- **Big-endian is now verified rather than asserted.** `shavar.c` claims
+  endian independence because it never casts a byte pointer to `uint32_t` and
+  does every conversion with explicit shifts. CI cross-compiles to s390x and
+  runs it under QEMU: `ELF 64-bit MSB executable, IBM S/390` → `ok 5`, and the
+  `"abc"` digest matches the little-endian one exactly. A claim like that is
+  worth little until something big-endian has actually executed it.
+- **AddressSanitizer and MemorySanitizer both run clean on Linux**, including
+  `detect_leaks` and `detect_stack_use_after_return` — the checks that are
+  unavailable or broken locally. So the local ASan hang really was a host
+  defect and not a latent bug in the code.
+
+Also covered: 36 compiler configurations (gcc-13, gcc-14, clang-18 × c99/c11/c17
+× four optimisation levels), static and shared library packaging with a runtime
+link check, the Lean build with a hard failure on any `sorry`, all seven
+implementations' self-tests, an eight-way cross-check, and the PDF build with
+an unresolved-reference gate.
+
+### The comparative PDF
+
+`doc/shavar.tex` → `doc/shavar.pdf`, seven pages, built by `latexmk` with
+`biber`. `doc/test_doc.sh` treats it as a tested artefact: it fails if the
+build breaks, if any reference resolves to `??` (LaTeX renders those and exits
+*successfully*, which is exactly the silent-breakage mode this project refuses
+to ship), if a bibliography entry fails to render, or if a local reference copy
+promised by `refs.bib` is missing from `refs/`.
+
+Three references are mirrored in `refs/` with provenance and retrieval dates.
+One near-miss worth recording: I downloaded what I believed was the
+`bv_decide` paper from a guessed arXiv ID and checked it before citing — it
+turned out to be an unrelated paper on multimodal LLM benchmarks. Deleted, and
+the correct reference (Böving et al., OOPSLA 2025) is cited with its DOI and
+an explicit "no local copy" note. A guessed citation that happens to resolve
+to *something* is worse than no citation, because it looks checked.
+
 ### Notes on method
 
 Six implementations were written concurrently by separate agents, each owning

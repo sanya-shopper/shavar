@@ -47,11 +47,12 @@
 \def\SHR{\mathop{\rm SHR}\nolimits}
 \def\GF{\mathop{\rm GF}\nolimits}
 
-% Figure captions, numbered by hand: there are only three.  Set narrower
+% Figure captions, numbered by hand: there are only four.  Set narrower
 % than the text block so a caption is never mistaken for body text.  Note that
 % \centerline is not \long and so cannot be used here: its argument would
 % contain the \par that ends the caption's paragraph.
 \font\eightit=cmti8
+\font\eighttt=cmtt8
 \def\caption#1#2{\smallskip
   {\parindent=0pt \leftskip=0.08\hsize \rightskip=0.08\hsize
    \baselineskip=10pt \eightrm{\eightit Figure #1.\/} #2\par}\smallskip}
@@ -423,6 +424,7 @@ order the C compiler sees, which is the only thing that order has to satisfy.
 @<The compression function@>@;
 @<Padding@>@;
 @<Hashing@>@;
+@<Proof of work@>@;
 
 @ @<Library inclusions@>=
 #include "shavar.h"
@@ -514,6 +516,12 @@ caller-chosen initial chaining value and round count. |shavar_padded_blocks|
 and |shavar_padded_block| let a caller walk the padded stream one block at a
 time without ever materialising it.
 
+|shavar_pow_target| and |shavar_pow_check| are the proof-of-work comparison of
+\secref{pow}. They are library-only: no subcommand of the driver reaches them,
+because the uniform command-line contract is shared with six other
+implementations and is not the place to grow a verb that only some callers
+want.
+
 @<Interface declarations@>=
 extern const uint32_t shavar_iv[8];
 extern const uint32_t shavar_k[64];
@@ -538,6 +546,9 @@ uint64_t shavar_padded_blocks(uint64_t nbits);
 
 int shavar_padded_block(const unsigned char *msg, uint64_t nbits, uint64_t idx,
                         unsigned char out[64]);
+
+int shavar_pow_target(uint32_t nbits, unsigned char target[SHAVAR_DIGEST_BYTES]);
+int shavar_pow_check(const unsigned char digest[SHAVAR_DIGEST_BYTES], uint32_t nbits);
 
 @* The constant tables.
 The initial chaining value $H[0\ldots7]$ is the first 32 bits of the fractional
@@ -936,6 +947,163 @@ int shavar_hash_ex(const unsigned char *msg, uint64_t nbits, const uint32_t iv[8
 int shavar_hash(const unsigned char *msg, uint64_t nbits, unsigned char out[SHAVAR_DIGEST_BYTES]) {
     return shavar_hash_ex(msg, nbits, shavar_iv, SHAVAR_ROUNDS, out);
 }
+
+@* Proof of work.
+\slabel{pow}
+A hash function used for {\it proof of work}---PoW, a search for an input whose
+digest is numerically small---is not asked what the digest is but whether it is
+small enough. That question needs the 32 digest bytes read as one 256-bit
+integer, and {\bf the order in which they are read is a convention, not a fact
+about the digest}. This section implements the Bitcoin convention, specified
+normatively in \.{spec/SPEC.md} \S10.
+
+Two terms before they are used. A {\it target} is the threshold, an unsigned
+256-bit integer; the PoW is met when the digest's value is at most the target.
+{\it nBits} is a compact 32-bit encoding of a target, an 8-bit exponent above a
+23-bit mantissa, and it is the form a Bitcoin block header carries. Note that
+the parameter named |nbits| in this section is that compact target and has
+nothing whatever to do with the message bit length called |nbits| everywhere
+else in this web. The collision of names is inherited from both conventions
+rather than chosen here, and it is the reason this paragraph exists.
+
+@ {\bf The byte order, which is the whole difficulty.} Let the digest bytes be
+numbered in {\it emission order}: |digest[0]| is the first byte the hash
+function produced, the most significant byte of $H[0]$. The value compared
+against the target is
+$$\hbox{value} \;=\; \sum_{i=0}^{31} |digest|[i]\cdot 256^{\,i}.$$
+So |digest[0]| is the {\bf least} significant byte and |digest[31]| is the
+{\bf most} significant---the reverse of the order the bytes are written in.
+
+$$\vcenter{\hbox{\tikzpicture[x=1cm,y=1cm,>=Stealth,
+  b/.style={draw,minimum height=0.62cm,minimum width=1.05cm,inner sep=1pt,
+            font=\eighttt}]
+  \node[b] (d0) at (0,0)    {6f};
+  \node[b] (d1) at (1.05,0) {e2};
+  \node[b] (d2) at (2.1,0)  {8c};
+  \node    (dd) at (3.15,0) {$\cdots$};
+  \node[b] (d29) at (4.2,0) {19};
+  \node[b] (d30) at (5.25,0){00};
+  \node[b] (d31) at (6.3,0) {00};
+  \node[font=\eightrm] at (0,0.55) {|digest[0]|};
+  \node[font=\eightrm] at (6.3,0.55) {|digest[31]|};
+  \draw[->] (0,-0.45) -- (0,-0.85);
+  \draw[->] (6.3,-0.45) -- (6.3,-0.85);
+  \node[font=\eightrm,align=center] at (0,-1.15) {LEAST\\significant\\$256^0$};
+  \node[font=\eightrm,align=center] at (6.3,-1.15) {MOST\\significant\\$256^{31}$};
+\endtikzpicture}}$$
+\caption{4}{The little-endian reading of the digest. The bytes shown are the
+first and last of the Bitcoin genesis block's doubled SHA-256, in emission
+order. Read this way the value is
+\.{0x00000000\thinspace0019d668\thinspace\char`\.\char`\.\char`\.}, which is the
+block hash as it is universally quoted; read the other way it would be
+\.{0x6fe28c0a\thinspace\char`\.\char`\.\char`\.}, about $2^{216}$ times larger,
+which fails every target ever used. This is why a block hash is {\it displayed}
+with its bytes reversed relative to the digest actually computed.}
+
+@ {\bf Decoding nBits.} With |exponent| the high byte and |mantissa| the low 23
+bits, the target is |mantissa| shifted left by $8(|exponent|-3)$ bits, or
+shifted right by $8(3-|exponent|)$ when |exponent| is at most 3. The exponent
+counts {\it bytes}, not bits.
+
+Bit \.{0x00800000} is a sign bit. A target is an unsigned magnitude, so a set
+sign bit is an error rather than something to mask away. An encoding is invalid,
+and must be reported as such rather than answered, when it is negative, when the
+target would not fit in 256 bits, or when the target is zero---nothing can be at
+or below zero, so such a request is unsatisfiable rather than merely unmet. The
+three overflow tests are each conditioned on a nonzero mantissa, because a zero
+mantissa is already caught by the zero-target test. This matches Bitcoin's
+\.{SetCompact} exactly.
+
+No bignum arithmetic appears anywhere, here or in the six sibling
+implementations, because the repository's rule is core language only. The target
+is instead built as 32 bytes in {\it big}-endian order, and at most three
+mantissa bytes are placed into an otherwise zeroed array.
+
+@<Proof of work@>=
+@<Decode a compact target@>@;
+@<Compare a digest against a target@>@;
+
+@ |shift| is the byte offset of the mantissa's low byte from the least
+significant end, so in a big-endian array of 32 bytes that byte lands at index
+$31-|shift|$ and the two above it at $30-|shift|$ and $29-|shift|$. The overflow
+test has already guaranteed that no nonzero byte would land at a negative index;
+the guards are kept anyway so that this section is correct read on its own.
+
+@<Decode a compact target@>=
+int shavar_pow_target(uint32_t nbits, unsigned char target[SHAVAR_DIGEST_BYTES]) {
+    uint32_t exponent = nbits >> 24;
+    uint32_t mantissa = nbits & 0x007FFFFFu;
+    int shift;
+    int i;
+
+    if (mantissa != 0u && (nbits & 0x00800000u) != 0u) return -1;
+
+    if (mantissa != 0u &&
+        (exponent > 34u || (mantissa > 0xFFu && exponent > 33u) ||
+         (mantissa > 0xFFFFu && exponent > 32u))) {
+        return -1;
+    }
+
+    for (i = 0; i < SHAVAR_DIGEST_BYTES; i++) target[i] = 0u;
+
+    if (exponent <= 3u) {
+        uint32_t v = mantissa >> (8u * (3u - exponent));
+        target[31] = (unsigned char)(v & 0xFFu);
+        target[30] = (unsigned char)((v >> 8) & 0xFFu);
+        target[29] = (unsigned char)((v >> 16) & 0xFFu);
+    } else {
+        shift = (int)exponent - 3;
+        if (31 - shift >= 0) target[31 - shift] = (unsigned char)(mantissa & 0xFFu);
+        if (30 - shift >= 0) target[30 - shift] = (unsigned char)((mantissa >> 8) & 0xFFu);
+        if (29 - shift >= 0) target[29 - shift] = (unsigned char)((mantissa >> 16) & 0xFFu);
+    }
+
+    for (i = 0; i < SHAVAR_DIGEST_BYTES; i++) {
+        if (target[i] != 0u) return 0;
+    }
+    return -1;
+}
+
+@ The comparison walks both values most significant byte first and stops at the
+first difference. The target array is already in that order; the digest is not,
+so it is indexed backwards.
+
+The expression |digest[SHAVAR_DIGEST_BYTES - 1 - i]| carries the entire
+convention of this section. Writing |digest[i]| there instead is the byte-order
+bug that \S10.1 of the specification exists to prevent, and it is silent: it
+compiles without a warning, it runs, and it returns a plausible verdict that is
+wrong almost always. The test suite pins it with a pair of vectors that are the
+same 32 bytes in opposite orders and that disagree.
+
+Reaching the end means every byte was equal, so the value equals the target.
+That is a pass: the relation is at-most, not strictly-less.
+
+@<Compare a digest against a target@>=
+int shavar_pow_check(const unsigned char digest[SHAVAR_DIGEST_BYTES], uint32_t nbits) {
+    unsigned char target[SHAVAR_DIGEST_BYTES];
+    int i;
+
+    if (shavar_pow_target(nbits, target) != 0) return -1;
+
+    for (i = 0; i < SHAVAR_DIGEST_BYTES; i++) {
+        unsigned char a = digest[SHAVAR_DIGEST_BYTES - 1 - i];
+        unsigned char b = target[i];
+        if (a < b) return 1;
+        if (a > b) return 0;
+    }
+    return 1;
+}
+
+@ {\bf What this is not.} There is no mining loop: the comparison takes a digest
+that has already been computed, and searching for a satisfying input is the
+caller's business. There is no \.{powLimit} check either---Bitcoin rejects any
+target above a chain-specific maximum before checking a header, but that is a
+consensus parameter rather than a property of the encoding. And the
+floating-point {\it difficulty} ratio is deliberately absent: several of the
+seven languages have no native form for it, the shell implementation has no
+floating-point arithmetic at all, and seven independently rounded
+approximations of one ratio is exactly the kind of unstated boundary that the
+repository's cross-testing exists to keep out.
 
 @* The command-line driver.
 \slabel{driver}

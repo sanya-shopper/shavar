@@ -1,0 +1,27 @@
+# Proof-of-work comparison vectors. SPEC.md §10.5 is normative;
+# this file is the machine-readable copy the drivers actually read.
+#
+# digest is 64 hex characters in EMISSION order -- the order the hash
+# function produced the bytes, i.e. exactly what `hash` prints. It is
+# read LITTLE-endian for the comparison: digest[0] is the LEAST
+# significant byte. See SPEC.md §10.1.
+#
+# id	digest	nbits	expect	note
+genesis-le	6fe28c0ab6f1b372c1a6a246ae63f74f931e8365e15a089c68d6190000000000	1d00ffff	met	Bitcoin genesis SHA256d at difficulty 1
+genesis-be	000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f	1d00ffff	unmet	same 32 bytes reversed: the byte-order trap
+zero	0000000000000000000000000000000000000000000000000000000000000000	1d00ffff	met	zero digest meets any valid target
+one-vs-one	0100000000000000000000000000000000000000000000000000000000000000	01010000	met	value 1, target 1: equality
+two-vs-one	0200000000000000000000000000000000000000000000000000000000000000	01010000	unmet	value 2, target 1
+maxdigest	ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff	207fffff	unmet	all-ones digest, largest encodable target
+equal-target	0000000000000000000000000000000000000000000000000000ffff00000000	1d00ffff	met	digest == target, so <= must accept
+small-exp-met	7f00000000000000000000000000000000000000000000000000000000000000	017f0000	met	exponent<=3 path
+small-exp-unmet	8000000000000000000000000000000000000000000000000000000000000000	017f0000	unmet	exponent<=3 path, one over
+shift-right	8000000000000000000000000000000000000000000000000000000000000000	02008000	met	mantissa shifted right by one byte
+target-plus-one	0100000000000000000000000000000000000000000000000000ffff00000000	1d00ffff	unmet	one over the target: pins <= not <
+invalid-00000000	0000000000000000000000000000000000000000000000000000000000000000	00000000	invalid	mantissa zero, target zero
+invalid-01003456	0000000000000000000000000000000000000000000000000000000000000000	01003456	invalid	mantissa shifts out entirely, target zero
+invalid-1d800000	0000000000000000000000000000000000000000000000000000000000000000	1d800000	invalid	sign bit set, mantissa zero, target zero
+invalid-1d8000ff	0000000000000000000000000000000000000000000000000000000000000000	1d8000ff	invalid	sign bit set with nonzero mantissa: negative
+invalid-ff123456	0000000000000000000000000000000000000000000000000000000000000000	ff123456	invalid	exponent 0xff: overflows 256 bits
+invalid-23000100	0000000000000000000000000000000000000000000000000000000000000000	23000100	invalid	mantissa>0xff with exponent>33: overflows
+invalid-22010000	0000000000000000000000000000000000000000000000000000000000000000	22010000	invalid	mantissa>0xffff with exponent>32: overflows

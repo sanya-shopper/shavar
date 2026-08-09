@@ -491,6 +491,105 @@ shavar_hash_ex() {
 }
 
 # ---------------------------------------------------------------------------
+# Proof-of-work comparison (SPEC.md §10)
+# ---------------------------------------------------------------------------
+#
+# The argument called <nbits> in this section is Bitcoin's compact *target*
+# encoding, an 8-bit exponent above a 23-bit mantissa. It has nothing to do
+# with the message bit length called L or nbits elsewhere in this file; the
+# collision of names is inherited from both conventions.
+#
+# It is passed as a shell integer, so a caller holding the usual hex spelling
+# writes  shavar_pow_target $((16#1d00ffff)).
+
+# shavar_pow_target <nbits> — decode into SHAVAR_POW_TARGET[0..31], BIG-endian:
+# index 0 is the most significant byte. Returns 1 on an encoding that is
+# negative, overflows 256 bits, or denotes zero.
+#
+# The target is built byte by byte. Shell arithmetic is 64-bit, so a 256-bit
+# value has no representation here at all — which is the same constraint the
+# six sibling implementations work under, and why they can be expected to
+# agree.
+shavar_pow_target() {
+  [ -n "${ZSH_VERSION:-}" ] && emulate -L ksh
+  local nb=$1 exponent mantissa shift i v
+  (( exponent = (nb >> 24) & 0xFF ))
+  (( mantissa = nb & 0x007FFFFF ))
+
+  # The sign bit. A target is an unsigned magnitude, so a set sign bit is an
+  # error rather than something to mask away. Guarded on a nonzero mantissa to
+  # match Bitcoin's SetCompact exactly.
+  if (( mantissa != 0 && (nb & 0x00800000) != 0 )); then
+    return 1
+  fi
+  if (( mantissa != 0 && (exponent > 34 || \
+        (mantissa > 0xFF && exponent > 33) || \
+        (mantissa > 0xFFFF && exponent > 32)) )); then
+    return 1
+  fi
+
+  SHAVAR_POW_TARGET=()
+  for ((i = 0; i < 32; i++)); do SHAVAR_POW_TARGET[i]=0; done
+
+  if (( exponent <= 3 )); then
+    # The mantissa shifts down and may vanish entirely.
+    (( v = mantissa >> (8 * (3 - exponent)) ))
+    (( SHAVAR_POW_TARGET[31] = v & 0xFF ))
+    (( SHAVAR_POW_TARGET[30] = (v >> 8) & 0xFF ))
+    (( SHAVAR_POW_TARGET[29] = (v >> 16) & 0xFF ))
+  else
+    # `shift` is the byte offset of the mantissa's low byte from the least
+    # significant end, so in a big-endian array it lands at index 31 - shift.
+    # The overflow test above guarantees no nonzero byte lands below index 0.
+    (( shift = exponent - 3 ))
+    (( 31 - shift >= 0 )) && (( SHAVAR_POW_TARGET[31 - shift] = mantissa & 0xFF ))
+    (( 30 - shift >= 0 )) && (( SHAVAR_POW_TARGET[30 - shift] = (mantissa >> 8) & 0xFF ))
+    (( 29 - shift >= 0 )) && (( SHAVAR_POW_TARGET[29 - shift] = (mantissa >> 16) & 0xFF ))
+  fi
+
+  # A zero target is unsatisfiable, so it is a malformed request rather than a
+  # verdict of "no" against every possible digest.
+  for ((i = 0; i < 32; i++)); do
+    (( SHAVAR_POW_TARGET[i] != 0 )) && return 0
+  done
+  return 1
+}
+
+# shavar_pow_check <digest-hex> <nbits> — exit status 0 if the digest meets the
+# target, 1 if it does not, 2 if <nbits> is invalid. <digest-hex> is 64 hex
+# characters in EMISSION order: exactly what `hash` prints.
+#
+# THE BYTE ORDER, the only thing here that is easy to get wrong: the digest is
+# read LITTLE-endian. Byte 0 — the first byte the hash function emitted, the
+# leftmost pair of the hex string — is the LEAST significant byte of the
+# 256-bit value, and byte 31 is the MOST significant. That is the reverse of
+# the order the bytes are written in, and it is why a Bitcoin block hash is
+# displayed reversed relative to the digest actually computed. SPEC.md §10.1.
+#
+# The comparison is "at most", not "strictly less".
+shavar_pow_check() {
+  [ -n "${ZSH_VERSION:-}" ] && emulate -L ksh
+  local h=$1 nb=$2 i a b
+  case "$h" in
+    *[!0-9a-fA-F]*) return 2 ;;
+  esac
+  [ ${#h} -eq 64 ] || return 2
+  shavar_pow_target "$nb" || return 2
+
+  # Both values walked most significant byte first. SHAVAR_POW_TARGET is
+  # already in that order; the digest is not, so it is indexed backwards.
+  # `31 - i` is the whole convention — using `i` there is the classic
+  # byte-order bug, and it is silent.
+  for ((i = 0; i < 32; i++)); do
+    (( a = 16#${h:$(( (31 - i) * 2 )):2} ))
+    (( b = SHAVAR_POW_TARGET[i] ))
+    (( a < b )) && return 0
+    (( a > b )) && return 1
+  done
+  return 0   # every byte equal: value == target, and the relation is <=
+}
+
+# ---------------------------------------------------------------------------
 # Input handling
 # ---------------------------------------------------------------------------
 

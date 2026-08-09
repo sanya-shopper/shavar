@@ -592,6 +592,102 @@ def difference(left, right):
 
 
 # --------------------------------------------------------------------------
+# 8a.  Proof-of-work comparison (SPEC.md §10)
+# --------------------------------------------------------------------------
+#
+# The parameter called ``nbits`` in this section is Bitcoin's compact *target*
+# encoding and has nothing to do with the message bit length called ``nbits``
+# everywhere else in this file.  The collision is inherited from both
+# conventions rather than chosen here.
+
+
+def pow_target(nbits):
+    """Decode a compact ``nBits`` target into 32 **big-endian** bytes.
+
+    ``target[0]`` is the most significant byte.  Raises :class:`ShavarError`
+    if the encoding is negative, overflows 256 bits, or denotes zero.
+
+    Python has arbitrary-precision integers and could simply shift, but this
+    builds the byte array the same way the six other implementations must,
+    because none of them may use a bignum library (SPEC.md §6) and the point
+    of having seven versions is that they agree for the same reasons.
+    """
+    exponent = nbits >> 24
+    mantissa = nbits & 0x007FFFFF
+
+    # The sign bit.  A target is an unsigned magnitude, so this is an error
+    # rather than something to mask off.  Guarded on a nonzero mantissa to
+    # match Bitcoin's SetCompact exactly.
+    if mantissa != 0 and (nbits & 0x00800000) != 0:
+        raise ShavarError("nBits 0x%08x is negative" % nbits)
+
+    if mantissa != 0 and (exponent > 34
+                          or (mantissa > 0xFF and exponent > 33)
+                          or (mantissa > 0xFFFF and exponent > 32)):
+        raise ShavarError("nBits 0x%08x overflows 256 bits" % nbits)
+
+    target = bytearray(32)
+    if exponent <= 3:
+        v = mantissa >> (8 * (3 - exponent))
+        target[31] = v & 0xFF
+        target[30] = (v >> 8) & 0xFF
+        target[29] = (v >> 16) & 0xFF
+    else:
+        # ``shift`` is the byte offset of the mantissa's low byte from the
+        # least significant end, so in a big-endian array it lands at index
+        # 31 - shift.  The overflow test above guarantees no nonzero byte
+        # would land at a negative index.
+        shift = exponent - 3
+        if 31 - shift >= 0:
+            target[31 - shift] = mantissa & 0xFF
+        if 30 - shift >= 0:
+            target[30 - shift] = (mantissa >> 8) & 0xFF
+        if 29 - shift >= 0:
+            target[29 - shift] = (mantissa >> 16) & 0xFF
+
+    # A zero target is unsatisfiable, so it is a malformed request rather
+    # than a verdict of "no" against every possible digest.
+    if not any(target):
+        raise ShavarError("nBits 0x%08x denotes a zero target" % nbits)
+    return bytes(target)
+
+
+def pow_check(digest_bytes, nbits):
+    """Does ``digest_bytes`` meet the target encoded by ``nbits``?
+
+    ``digest_bytes`` is the digest in **emission order** — the order
+    :func:`digest` returns, and the order the hex of :func:`hexdigest` reads.
+
+    THE BYTE ORDER, which is the only thing here that is easy to get wrong:
+    the digest is read LITTLE-endian.  ``digest_bytes[0]``, the first byte the
+    hash function emitted, is the LEAST significant byte of the 256-bit value;
+    ``digest_bytes[31]`` is the MOST significant.  That is the reverse of the
+    order the bytes are written in, and it is why a Bitcoin block hash is
+    displayed reversed relative to the digest actually computed.  See
+    SPEC.md §10.1.
+
+    The comparison is ``value <= target``, not ``<``.
+    """
+    if len(digest_bytes) != DIGEST_BYTES:
+        raise ShavarError("digest must be %d bytes, got %d"
+                          % (DIGEST_BYTES, len(digest_bytes)))
+    target = pow_target(nbits)
+
+    # Both values walked most significant byte first.  ``target`` is already
+    # in that order; the digest is not, so it is indexed backwards.  That
+    # index expression is the whole convention: writing ``digest_bytes[i]``
+    # there is the classic byte-order bug, and it is silent.
+    for i in range(DIGEST_BYTES):
+        a = digest_bytes[DIGEST_BYTES - 1 - i]
+        b = target[i]
+        if a < b:
+            return True
+        if a > b:
+            return False
+    return True  # every byte equal: value == target, and the relation is <=
+
+
+# --------------------------------------------------------------------------
 # 9.  Known-answer vectors
 # --------------------------------------------------------------------------
 #

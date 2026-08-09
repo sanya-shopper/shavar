@@ -671,7 +671,100 @@
               (trace-hout (compress h (padded-block msg nbits i) rounds))))))
 
 ;;; ===========================================================================
-;;; 10. HEX
+;;; 10. PROOF OF WORK  (SPEC.md §10)
+;;; ===========================================================================
+;;;
+;;; The argument called `nbits` in this section is Bitcoin's compact *target*
+;;; encoding and has nothing to do with the message bit length called `nbits`
+;;; everywhere else in this file.  The collision of names is inherited from
+;;; both conventions rather than chosen here.
+;;;
+;;; Scheme has exact arbitrary-precision integers and could do this by
+;;; shifting one number, but the target is built as 32 bytes the same way the
+;;; six sibling implementations must, none of which has a bignum available.
+;;; Seven versions agreeing is worth more when they agree for the same
+;;; reasons.  The arithmetic below uses `quotient` and `remainder` rather than
+;;; the bitwise layer of section 1, so it is independent of which backend that
+;;; layer selected.
+
+;; Decode a compact `nbits` target into a 32-byte BIG-endian bytevector: index
+;; 0 is the most significant byte.  Raises an error if the encoding is
+;; negative, overflows 256 bits, or denotes zero.
+(define (pow-target nbits)
+  (let* ((exponent (quotient nbits 16777216))       ; the high byte
+         (mantissa (remainder nbits 8388608))       ; the low 23 bits
+         ;; Bit 23 is the sign bit: the low bit of everything above the
+         ;; mantissa.  A target is an unsigned magnitude, so a set sign bit is
+         ;; an error rather than something to mask away.  Guarded on a nonzero
+         ;; mantissa to match Bitcoin's SetCompact exactly.
+         (negative (and (not (zero? mantissa))
+                        (odd? (quotient nbits 8388608)))))
+    (if negative
+        (shavar-error "nBits is negative" nbits))
+    (if (and (not (zero? mantissa))
+             (or (> exponent 34)
+                 (and (> mantissa 255)   (> exponent 33))
+                 (and (> mantissa 65535) (> exponent 32))))
+        (shavar-error "nBits overflows 256 bits" nbits))
+
+    (let ((t (make-bytevector 32 0)))
+      ;; `place!` writes one byte at a big-endian index, ignoring an index
+      ;; that has fallen off the top.  The overflow test above guarantees that
+      ;; only zero bytes can do so.
+      (let ((place! (lambda (idx v)
+                      (if (>= idx 0) (bytevector-u8-set! t idx v)))))
+        (if (<= exponent 3)
+            ;; The mantissa shifts down and may vanish entirely.
+            (let ((v (quotient mantissa (expt 256 (- 3 exponent)))))
+              (place! 31 (remainder v 256))
+              (place! 30 (remainder (quotient v 256) 256))
+              (place! 29 (quotient v 65536)))
+            ;; `shift` is the byte offset of the mantissa's low byte from the
+            ;; least significant end, so in a big-endian array it lands at
+            ;; index 31 - shift.
+            (let ((shift (- exponent 3)))
+              (place! (- 31 shift) (remainder mantissa 256))
+              (place! (- 30 shift) (remainder (quotient mantissa 256) 256))
+              (place! (- 29 shift) (quotient mantissa 65536)))))
+
+      ;; A zero target is unsatisfiable, so it is a malformed request rather
+      ;; than a verdict of "no" against every possible digest.
+      (let loop ((i 0))
+        (cond ((= i 32) (shavar-error "nBits denotes a zero target" nbits))
+              ((not (zero? (bytevector-u8-ref t i))) t)
+              (else (loop (+ i 1))))))))
+
+;; Does `digest` — 32 bytes in EMISSION order, the order the hash function
+;; produced them — meet the target encoded by `nbits`?  Returns #t or #f, and
+;; raises an error if `nbits` is invalid.
+;;
+;; THE BYTE ORDER, which is the only thing here that is easy to get wrong: the
+;; digest is read LITTLE-endian.  Byte 0, the first byte the hash function
+;; emitted, is the LEAST significant byte of the 256-bit value and byte 31 is
+;; the MOST significant.  That is the reverse of the order the bytes are
+;; written in, and it is why a Bitcoin block hash is displayed reversed
+;; relative to the digest actually computed.  See SPEC.md §10.1.
+;;
+;; The comparison is "at most", not "strictly less".
+(define (pow-check digest nbits)
+  (if (not (= (bytevector-length digest) 32))
+      (shavar-error "digest must be 32 bytes" (bytevector-length digest)))
+  (let ((t (pow-target nbits)))
+    ;; Both values walked most significant byte first.  `t` is already in that
+    ;; order; the digest is not, so it is indexed backwards.  `(- 31 i)` is the
+    ;; whole convention — using `i` there is the classic byte-order bug, and it
+    ;; is silent.
+    (let loop ((i 0))
+      (if (= i 32)
+          #t                            ; every byte equal: value = target
+          (let ((a (bytevector-u8-ref digest (- 31 i)))
+                (b (bytevector-u8-ref t i)))
+            (cond ((< a b) #t)
+                  ((> a b) #f)
+                  (else (loop (+ i 1)))))))))
+
+;;; ===========================================================================
+;;; 11. HEX
 ;;; ===========================================================================
 
 (define hex-alphabet "0123456789abcdef")
@@ -718,7 +811,7 @@
                      (loop (+ i 1)))))))))))
 
 ;;; ===========================================================================
-;;; 11. SELF-TEST VECTORS
+;;; 12. SELF-TEST VECTORS
 ;;; ===========================================================================
 ;;;
 ;;; Each case is a list (label expected thunk).  The thunk returns a string;
@@ -975,7 +1068,7 @@
                   (loop (cdr cases) passed (+ failed 1)))))))))
 
 ;;; ===========================================================================
-;;; 12. COMMAND LINE  (CLI.md)
+;;; 13. COMMAND LINE  (CLI.md)
 ;;; ===========================================================================
 
 (define (put s) (write-string s (current-output-port)))
@@ -1103,4 +1196,12 @@
                                     "\n" usage)))))))
 
 ;; `command-line` returns the program name followed by its arguments.
-(main (cdr (command-line)))
+;;
+;; Run the CLI unless the file was loaded as a library.  R7RS has no portable
+;; way for a file to ask whether it is the program being run, so the caller
+;; says so explicitly — the same convention, and the same spelling, that
+;; sh/shavar.sh uses:  SHAVAR_LIB=1 chibi-scheme -r driver.scm
+;; `get-environment-variable` is part of (scheme process-context), already
+;; imported above, so this costs no new dependency.
+(if (not (get-environment-variable "SHAVAR_LIB"))
+    (main (cdr (command-line))))

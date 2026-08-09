@@ -344,6 +344,94 @@ sub hash {
 sub hexdigest { return sprintf('%08x' x 8, @_) }
 
 # ---------------------------------------------------------------------------
+# Proof-of-work comparison (SPEC.md §10)
+# ---------------------------------------------------------------------------
+#
+# The argument called $nbits here is Bitcoin's compact *target* encoding and
+# has nothing to do with the message bit length called $nbits elsewhere in
+# this file. The collision is inherited from both conventions.
+
+# pow_target($nbits) -> 32 bytes, BIG-endian: byte 0 is the most significant.
+# Dies on an encoding that is negative, overflows 256 bits, or denotes zero.
+#
+# Built byte by byte rather than by shifting an integer, because Perl's native
+# integers are 64-bit and a 256-bit target does not fit in one. The other six
+# implementations have the same constraint for the same reason, which is why
+# they can be expected to agree.
+sub pow_target {
+    my ($nbits)  = @_;
+    my $exponent = ($nbits >> 24) & 0xFF;
+    my $mantissa = $nbits & 0x007FFFFF;
+
+    # The sign bit. A target is an unsigned magnitude, so a set sign bit is an
+    # error rather than something to mask away. Guarded on a nonzero mantissa
+    # to match Bitcoin's SetCompact exactly.
+    die sprintf("nBits 0x%08x is negative\n", $nbits)
+        if $mantissa != 0 && ($nbits & 0x00800000) != 0;
+
+    die sprintf("nBits 0x%08x overflows 256 bits\n", $nbits)
+        if $mantissa != 0
+        && ( $exponent > 34
+          || ($mantissa > 0xFF   && $exponent > 33)
+          || ($mantissa > 0xFFFF && $exponent > 32) );
+
+    my @t = (0) x 32;
+    if ($exponent <= 3) {
+        my $v = $mantissa >> (8 * (3 - $exponent));
+        $t[31] = $v & 0xFF;
+        $t[30] = ($v >> 8) & 0xFF;
+        $t[29] = ($v >> 16) & 0xFF;
+    }
+    else {
+        # $shift is the byte offset of the mantissa's low byte from the least
+        # significant end, so in a big-endian array it lands at index
+        # 31 - $shift. The overflow test above guarantees that no nonzero
+        # byte would land at a negative index.
+        my $shift = $exponent - 3;
+        $t[31 - $shift] = $mantissa & 0xFF          if 31 - $shift >= 0;
+        $t[30 - $shift] = ($mantissa >> 8) & 0xFF   if 30 - $shift >= 0;
+        $t[29 - $shift] = ($mantissa >> 16) & 0xFF  if 29 - $shift >= 0;
+    }
+
+    # A zero target is unsatisfiable, so it is a malformed request rather than
+    # a verdict of "no" against every possible digest.
+    die sprintf("nBits 0x%08x denotes a zero target\n", $nbits)
+        unless grep { $_ != 0 } @t;
+
+    return pack('C32', @t);
+}
+
+# pow_check($digest, $nbits) -> 1 if the digest meets the target, 0 if not.
+# Dies if $nbits is invalid. $digest is 32 raw bytes in EMISSION order.
+#
+# THE BYTE ORDER, the only thing here that is easy to get wrong: the digest is
+# read LITTLE-endian. Byte 0 — the first byte the hash function emitted — is
+# the LEAST significant byte of the 256-bit value and byte 31 is the MOST
+# significant. That is the reverse of the order the bytes are written in, and
+# it is why a Bitcoin block hash is displayed reversed relative to the digest
+# actually computed. See SPEC.md §10.1. The comparison is <=, not <.
+sub pow_check {
+    my ($digest, $nbits) = @_;
+    die sprintf("digest must be 32 bytes, got %d\n", length($digest))
+        unless length($digest) == 32;
+
+    my @d = unpack('C32', $digest);
+    my @t = unpack('C32', pow_target($nbits));
+
+    # Both values walked most significant byte first. @t is already in that
+    # order; the digest is not, so it is indexed backwards. `$d[31 - $i]` is
+    # the whole convention — writing `$d[$i]` there is the classic byte-order
+    # bug, and it is silent.
+    for my $i (0 .. 31) {
+        my $a = $d[31 - $i];
+        my $b = $t[$i];
+        return 1 if $a < $b;
+        return 0 if $a > $b;
+    }
+    return 1;   # every byte equal: value == target, and the relation is <=
+}
+
+# ---------------------------------------------------------------------------
 # Command line (CLI.md)
 # ---------------------------------------------------------------------------
 

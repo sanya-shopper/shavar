@@ -313,3 +313,76 @@ int shavar_hash_ex(const unsigned char *msg, uint64_t nbits, const uint32_t iv[8
 int shavar_hash(const unsigned char *msg, uint64_t nbits, unsigned char out[SHAVAR_DIGEST_BYTES]) {
     return shavar_hash_ex(msg, nbits, shavar_iv, SHAVAR_ROUNDS, out);
 }
+
+/* ------------------------------------------------------------------ */
+/* Proof-of-work comparison (SPEC.md §10)                              */
+/* ------------------------------------------------------------------ */
+
+int shavar_pow_target(uint32_t nbits, unsigned char target[SHAVAR_DIGEST_BYTES]) {
+    uint32_t exponent = nbits >> 24;
+    uint32_t mantissa = nbits & 0x007FFFFFu;
+    int shift; /* byte offset of the mantissa's low byte from the LSB end */
+    int i;
+
+    /* The sign bit. A target is an unsigned magnitude, so this is an error
+     * rather than something to mask off. A zero mantissa means a zero target,
+     * which the final test rejects anyway, hence the mantissa != 0 guard —
+     * it matches Bitcoin's SetCompact exactly. */
+    if (mantissa != 0u && (nbits & 0x00800000u) != 0u) return -1;
+
+    /* Does not fit in 256 bits. Same three-way test as SetCompact. */
+    if (mantissa != 0u &&
+        (exponent > 34u || (mantissa > 0xFFu && exponent > 33u) ||
+         (mantissa > 0xFFFFu && exponent > 32u))) {
+        return -1;
+    }
+
+    for (i = 0; i < SHAVAR_DIGEST_BYTES; i++) target[i] = 0u;
+
+    if (exponent <= 3u) {
+        /* Mantissa shifts down and may vanish entirely. Done as a value shift
+         * because the result is small enough to hold in the low bytes. */
+        uint32_t v = mantissa >> (8u * (3u - exponent));
+        target[31] = (unsigned char)(v & 0xFFu);
+        target[30] = (unsigned char)((v >> 8) & 0xFFu);
+        target[29] = (unsigned char)((v >> 16) & 0xFFu);
+    } else {
+        /* target = mantissa << 8*(exponent-3). No bignum: place the three
+         * mantissa bytes directly. `shift` is a byte offset from the least
+         * significant end, so big-endian index 31 - shift holds the low byte.
+         * The overflow test above guarantees every nonzero byte lands at a
+         * non-negative index. */
+        shift = (int)exponent - 3;
+        if (31 - shift >= 0) target[31 - shift] = (unsigned char)(mantissa & 0xFFu);
+        if (30 - shift >= 0) target[30 - shift] = (unsigned char)((mantissa >> 8) & 0xFFu);
+        if (29 - shift >= 0) target[29 - shift] = (unsigned char)((mantissa >> 16) & 0xFFu);
+    }
+
+    /* A zero target is unsatisfiable, so treat it as a malformed request
+     * rather than answering "no" to every digest. */
+    for (i = 0; i < SHAVAR_DIGEST_BYTES; i++) {
+        if (target[i] != 0u) return 0;
+    }
+    return -1;
+}
+
+int shavar_pow_check(const unsigned char digest[SHAVAR_DIGEST_BYTES], uint32_t nbits) {
+    unsigned char target[SHAVAR_DIGEST_BYTES];
+    int i;
+
+    if (shavar_pow_target(nbits, target) != 0) return -1;
+
+    /* SPEC.md §10.4. The digest is read LITTLE-endian: digest[0] is its least
+     * significant byte, so the most significant byte is digest[31] and the
+     * scan runs backwards through it. The target array is already big-endian.
+     *
+     * `digest[31 - i]` is the whole convention. Writing `digest[i]` here is
+     * the classic byte-order bug: it compiles, it runs, and it is wrong. */
+    for (i = 0; i < SHAVAR_DIGEST_BYTES; i++) {
+        unsigned char a = digest[SHAVAR_DIGEST_BYTES - 1 - i];
+        unsigned char b = target[i];
+        if (a < b) return 1;
+        if (a > b) return 0;
+    }
+    return 1; /* every byte equal: value == target, and the relation is <= */
+}

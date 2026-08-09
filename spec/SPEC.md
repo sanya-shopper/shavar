@@ -232,6 +232,11 @@ free-start (chosen-IV) attacks and reduced-round distinguishers are the bread
 and butter of hash cryptanalysis, and a library that only ever starts from the
 FIPS initial value cannot express them.
 
+Each implementation also offers the **proof-of-work comparison** of §10 —
+decode a compact `nBits` target and decide whether a digest meets it. This one
+is library-only: it has no CLI verb, so `tests/pow.sh` drives it through a
+small per-language driver instead of through the uniform command line.
+
 ---
 
 ## 7. Notes for cryptanalytic use
@@ -299,6 +304,7 @@ different kinds of evidence.
 | V4 | Padding is injective | Lean |
 | V5 | The implementations agree with FIPS 180-4 | NIST CAVP known-answer vectors, byte- and bit-oriented |
 | V6 | The implementations agree with **each other** | Cross-testing on digests *and* on per-round traces, over a swept corpus of bit lengths |
+| V7 | The PoW comparison (§10) reads the digest in the right byte order | Vectors anchored to the Bitcoin genesis block, run through every implementation by `tests/pow.sh`; the Lean version additionally proves the byte-wise loop equals the 256-bit integer comparison |
 
 V5 and V6 answer different questions. V5 catches a shared misreading of the
 standard; V6 catches a transcription slip in one language, and because it
@@ -370,3 +376,201 @@ Both derivations are checkable, and `tests/` recomputes them from the primes
 rather than trusting the transcription above. A mistyped constant is the
 classic way one of five implementations ends up subtly different from the
 other four, and it is cheap to rule out.
+
+---
+
+## 10. Proof-of-work comparison
+
+A hash function used for proof of work (PoW) is not asked "what is the
+digest?" but "is the digest small enough?". *Small* requires reading the 32
+digest bytes as a single 256-bit integer, and **the order in which those bytes
+are read is a convention, not a fact about the digest**. Getting it wrong
+produces a comparison that is wrong roughly all of the time while still
+looking entirely plausible, so this section fixes the order explicitly.
+
+This repository implements the **Bitcoin** convention, because it is the one
+in wide use and the one whose byte order most often surprises people.
+
+Terms used below, defined before use:
+
+- **PoW** — proof of work: a search for an input whose digest is numerically
+  below a threshold.
+- **target** — that threshold, a 256-bit unsigned integer.
+- **nBits** — a 32-bit *compact* encoding of a target, a three-byte mantissa
+  with a one-byte exponent. Bitcoin block headers carry the target in this
+  form.
+
+### 10.1 The digest is read little-endian
+
+Let `D[0…31]` be the digest bytes **in the order the hash function emits
+them** — `D[0]` is the first output byte, the most significant byte of `H[0]`
+(§1). The PoW value is
+
+```
+value = Σ  D[i] · 256^i           for i = 0 … 31
+```
+
+That is: **`D[0]` is the LEAST significant byte and `D[31]` is the MOST
+significant byte.**
+
+```
+    D[0]  D[1]  D[2]   ...   D[29] D[30] D[31]
+     6f    e2    8c            19    00    00
+     ^^                                    ^^
+   LEAST significant              MOST significant
+   (256^0)                            (256^31)
+```
+
+This is the reverse of the order the bytes are written in. It is also why a
+Bitcoin block hash is *displayed* with its bytes reversed relative to the
+digest the hash function actually produced: the display shows the integer
+most-significant-byte-first, as numbers are normally written.
+
+Worked example, the Bitcoin genesis block. Hashing its 80-byte header with
+SHA-256 twice gives, in emission order:
+
+```
+D = 6fe28c0a b6f1b372 c1a6a246 ae63f74f 931e8365 e15a089c 68d61900 00000000
+```
+
+Read little-endian per the rule above, the value is
+
+```
+value = 0x00000000 0019d668 9c085ae1 65831e93 4ff763ae 46a2a6c1 72b3f1b6 0a8ce26f
+```
+
+which is exactly the block hash as everyone quotes it. Reading the same bytes
+big-endian instead would give `0x6fe28c0a…`, a number about 2^216 times
+larger, which fails every target ever used. §10.5 makes this a test case.
+
+### 10.2 Decoding nBits to a target
+
+Given the 32-bit value `nBits`:
+
+```
+exponent = nBits >> 24                     (the high byte)
+mantissa = nBits & 0x007FFFFF              (the low 23 bits)
+
+if exponent ≤ 3:   target = mantissa >> (8 · (3 − exponent))
+else:              target = mantissa << (8 · (exponent − 3))
+```
+
+So `exponent` counts **bytes**, not bits, and the mantissa's least significant
+byte sits at byte position `exponent − 3` counting from the least significant
+end of the 256-bit target.
+
+Bit `0x00800000` of `nBits` is a **sign** bit. A target is never negative, so
+its being set is an error rather than something to mask away.
+
+An `nBits` value is **invalid** if any of the following hold, and an
+implementation must report an error rather than return a verdict:
+
+| Condition | Why |
+| --- | --- |
+| `mantissa ≠ 0` and `nBits & 0x00800000 ≠ 0` | negative target |
+| `mantissa ≠ 0` and `exponent > 34` | target does not fit in 256 bits |
+| `mantissa > 0x0000FF` and `exponent > 33` | same, one byte tighter |
+| `mantissa > 0x00FFFF` and `exponent > 32` | same, two bytes tighter |
+| `target = 0` | nothing can be below it; always unsatisfiable |
+
+Note that the overflow tests are all conditioned on `mantissa ≠ 0`: a zero
+mantissa means a zero target, which is caught by the last row instead.
+
+### 10.3 The comparison
+
+The PoW is **met** if and only if
+
+```
+value ≤ target
+```
+
+The relation is `≤`, not `<`. A digest exactly equal to the target satisfies
+the requirement.
+
+### 10.4 The byte-wise procedure implementations actually use
+
+None of the implementations here may use a bignum library (§6 — core language
+only), so no implementation forms `value` as an integer. Instead the target is
+built as a 32-byte **big-endian** array `T[0…31]`, where `T[0]` is its most
+significant byte, and the comparison is done byte by byte:
+
+```
+for i = 0 … 31:
+    a = D[31 − i]          ← digest, reversed: most significant byte first
+    b = T[i]               ← target, already most significant byte first
+    if a < b:  return MET
+    if a > b:  return NOT MET
+return MET                 ← all 32 bytes equal, so value = target
+```
+
+The single line that carries the entire convention is `a = D[31 − i]`. Writing
+`D[i]` there instead is the byte-order bug this section exists to prevent, and
+it is silent: it compiles, it runs, and it answers plausibly.
+
+Building `T` from `nBits` without a bignum, given the decode of §10.2, means
+placing at most three mantissa bytes into a zeroed 32-byte array. With
+`shift = exponent − 3` (the byte offset from the least significant end) the
+three mantissa bytes land at big-endian indices `31 − shift`, `31 − shift − 1`
+and `31 − shift − 2`; any that would land at a negative index must be zero, or
+the value overflows and §10.2 has already rejected it.
+
+### 10.5 Test vectors
+
+`tests/pow.sh` runs these through every implementation. Digests are written in
+**emission order**, the order the hash function produced them — the same order
+`hash` prints — so `D[0]` is the leftmost byte pair.
+
+| # | digest `D[0…31]` (emission order) | nBits | verdict |
+| --- | --- | --- | --- |
+| 1 | `6fe28c0ab6f1b372c1a6a246ae63f74f931e8365e15a089c68d6190000000000` | `1d00ffff` | met |
+| 2 | `000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f` | `1d00ffff` | **not met** |
+| 3 | `0000…0000` (all zero) | `1d00ffff` | met |
+| 4 | `0100…0000` | `01010000` | met |
+| 5 | `0200…0000` | `01010000` | not met |
+| 6 | `ffff…ffff` (all ones) | `207fffff` | not met |
+| 7 | `0000000000000000000000000000000000000000000000000000ffff00000000` | `1d00ffff` | met (equality) |
+| 8 | `7f00…0000` | `017f0000` | met |
+| 9 | `8000…0000` | `017f0000` | not met |
+| 10 | `8000…0000` | `02008000` | met |
+| 11 | `0100000000000000000000000000000000000000000000000000ffff00000000` | `1d00ffff` | not met (target + 1) |
+
+Vectors 1 and 2 are the same 32 bytes in opposite orders, and they disagree.
+That pair is the whole point of this section: an implementation that reads the
+digest big-endian passes vector 2 and fails vector 1, and no other vector in
+the table distinguishes the two readings as sharply. Vector 1 is the real
+Bitcoin genesis block digest and `1d00ffff` is its real `nBits`, so the pair is
+anchored to something external rather than to this document's own arithmetic.
+
+Vector 7 pins `≤` rather than `<`, and vector 11 pins that one more than the
+target is rejected.
+
+These `nBits` values must all be **rejected** as invalid:
+
+| nBits | why |
+| --- | --- |
+| `00000000` | mantissa zero, so target zero |
+| `01003456` | mantissa shifts out entirely, target zero |
+| `1d800000` | sign bit set but mantissa zero, so target zero |
+| `1d8000ff` | sign bit set with a nonzero mantissa: negative |
+| `ff123456` | exponent 0xff: overflow |
+| `23000100` | mantissa > 0xff with exponent > 33: overflow |
+| `22010000` | mantissa > 0xffff with exponent > 32: overflow |
+
+### 10.6 What this is not
+
+The comparison takes an already-computed digest. It does not iterate a nonce,
+and no implementation here contains a mining loop — searching for a
+satisfying input is the caller's business and would say nothing about SHA-256
+that §7 does not already say.
+
+Bitcoin additionally rejects any target above a chain-specific maximum
+(`powLimit`) before checking a header. That is a consensus-rule parameter, not
+a property of the encoding, so it is deliberately outside this specification;
+`nBits` values that decode to a valid but very large target are accepted here.
+
+Nor is the conventional floating-point *difficulty* (`difficulty_1_target ÷
+target`) computed anywhere. It is a human-facing ratio, it needs division that
+several of these languages have no native form of — the shell implementation
+has no floating-point arithmetic at all — and seven independently rounded
+approximations of one ratio is precisely the sort of unstated boundary §8
+exists to keep out of this repository.

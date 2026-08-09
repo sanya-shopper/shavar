@@ -96,4 +96,30 @@ uint64_t shavar_padded_blocks(uint64_t nbits);
 int shavar_padded_block(const unsigned char *msg, uint64_t nbits, uint64_t idx,
                         unsigned char out[64]);
 
+/* ---- proof-of-work comparison (SPEC.md §10) -----------------------------
+ *
+ * `nbits` here is a compact *target* encoding — Bitcoin's nBits, a 23-bit
+ * mantissa with an 8-bit exponent — and has nothing to do with the message
+ * bit length called nbits elsewhere in this header. The spelling collision is
+ * inherited from both conventions and is why this comment exists.
+ *
+ * shavar_pow_target decodes it into a 32-byte BIG-endian target: target[0] is
+ * the most significant byte. Returns 0, or -1 if the encoding is negative,
+ * overflows 256 bits, or denotes zero.
+ *
+ * shavar_pow_check returns 1 if the digest meets the target, 0 if it does
+ * not, and -1 if `nbits` is invalid.
+ *
+ * THE BYTE ORDER, because it is the only thing here that is easy to get
+ * wrong: the digest is read LITTLE-endian. digest[0] — the first byte the
+ * hash function emitted — is the LEAST significant byte of the 256-bit value,
+ * and digest[31] is the MOST significant. This is the reverse of the order
+ * the bytes are written in, and it is why a Bitcoin block hash is displayed
+ * reversed relative to the digest actually computed. The target array is the
+ * other way round, most significant byte first. See SPEC.md §10.1.
+ *
+ * The comparison is `value <= target`, not `<`. */
+int shavar_pow_target(uint32_t nbits, unsigned char target[SHAVAR_DIGEST_BYTES]);
+int shavar_pow_check(const unsigned char digest[SHAVAR_DIGEST_BYTES], uint32_t nbits);
+
 #endif /* SHAVAR_H */

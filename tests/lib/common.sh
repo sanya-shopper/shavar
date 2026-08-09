@@ -6,12 +6,15 @@
 # tests/run.sh.  Deliberately POSIX-ish: macOS ships bash 3.2, so there are no
 # associative arrays, no `local -n`, no ${var^^}.  Where real data structures
 # are needed the work is handed to awk or python3 (the "no modules / core
-# language only" rule constrains the seven implementations, not this harness).
+# language only" rule constrains the implementations under test, not this
+# harness).
 #
 # Terminology used throughout:
 #
-#   impl      one of the seven implementations under test, identified by a
-#             short id: c, py, pl, scm, js, sh, shz, lean.
+#   impl      one build under test, identified by a short id.  Seven languages
+#             give eight ids, because the one shell source is tested under both
+#             bash (`sh`) and zsh (`shz`):
+#                 c  py  pl  scm  js  sh  shz  lean
 #   oracle    an independent, already-trusted SHA-256 program on this machine
 #             (openssl, shasum, sha256sum).  Oracles can only hash whole
 #             bytes, so they are silent on every sub-byte-length case.
@@ -86,7 +89,11 @@ impl_desc() {
     py)   echo "$PYTHON $ROOT/py/shavar.py" ;;
     pl)   echo "$PERL $ROOT/pl/shavar.pl" ;;
     scm)  echo "$CHIBI $ROOT/scm/shavar.scm" ;;
-    js)   echo "$JSC $ROOT/js/shavar-cli.js --" ;;
+    js)   if [ -x "$ROOT/js/shavar-cli.js" ]; then
+            echo "$ROOT/js/shavar-cli.js (polyglot sh/jsc entry point)"
+          else
+            echo "$JSC $ROOT/js/shavar-cli.js -- (raw jsc: cannot return exit code 2)"
+          fi ;;
     sh)   echo "$BASH_BIN $ROOT/sh/shavar.sh" ;;
     shz)  echo "$ZSH_BIN $ROOT/sh/shavar.sh (same source, zsh)" ;;
     lean) echo "${SHAVAR_LEAN_BIN:-$ROOT/lean/.lake/build/bin/shavar}" ;;
@@ -94,29 +101,64 @@ impl_desc() {
   esac
 }
 
-# impl_run ID ARGS... -> runs the implementation.  stdout is the impl's stdout.
-impl_run() {
-  _id=$1; shift
-  case $_id in
-    c)    "$ROOT/c/shavar" "$@" ;;
-    py)   "$PYTHON" "$ROOT/py/shavar.py" "$@" ;;
-    pl)   "$PERL" "$ROOT/pl/shavar.pl" "$@" ;;
-    scm)  "$CHIBI" "$ROOT/scm/shavar.scm" "$@" ;;
-    js)   "$JSC" "$ROOT/js/shavar-cli.js" -- "$@" ;;
-    sh)   "$BASH_BIN" "$ROOT/sh/shavar.sh" "$@" ;;
-    shz)  "$ZSH_BIN" "$ROOT/sh/shavar.sh" "$@" ;;
-    lean) "${SHAVAR_LEAN_BIN:-$ROOT/lean/.lake/build/bin/shavar}" "$@" ;;
+# impl_argv ID -> the invocation prefix, one argument per line.  Used to hand
+# the command to lib/runner.py, which supplies the timeout and the loop.
+impl_argv() {
+  case $1 in
+    c)    printf '%s\n' "$ROOT/c/shavar" ;;
+    py)   printf '%s\n' "$PYTHON" "$ROOT/py/shavar.py" ;;
+    pl)   printf '%s\n' "$PERL" "$ROOT/pl/shavar.pl" ;;
+    scm)  printf '%s\n' "$CHIBI" "$ROOT/scm/shavar.scm" ;;
+    # js/shavar-cli.js is a polyglot: an sh header that re-executes itself
+    # under jsc and then translates the result back into a real process exit
+    # status.  That matters, because jsc's quit() cannot carry one -- invoked
+    # as `jsc shavar-cli.js -- ...` the script can only abort, which surfaces
+    # as exit 3 with an exception trace on STDOUT, violating both the exit-code
+    # table and the "stdout is always well-formed output or empty" rule of
+    # spec/CLI.md.  So use the executable entry point when there is one, and
+    # fall back to raw jsc only if the executable bit is missing.
+    js)   if [ -x "$ROOT/js/shavar-cli.js" ]; then
+            printf '%s\n' "$ROOT/js/shavar-cli.js"
+          else
+            printf '%s\n' "$JSC" "$ROOT/js/shavar-cli.js" "--"
+          fi ;;
+    sh)   printf '%s\n' "$BASH_BIN" "$ROOT/sh/shavar.sh" ;;
+    shz)  printf '%s\n' "$ZSH_BIN" "$ROOT/sh/shavar.sh" ;;
+    lean) printf '%s\n' "${SHAVAR_LEAN_BIN:-$ROOT/lean/.lake/build/bin/shavar}" ;;
     *)    return 127 ;;
   esac
 }
 
-# now_ms — wall clock in milliseconds.  BSD date has no %N, so this goes
-# through python3 rather than pretending `date +%s%N` is portable.
-now_ms() { "$PYTHON" -c 'import time;print(int(time.time()*1000))'; }
+# Per-invocation wall-clock limit.  An implementation under active development
+# can hang; when it does it must be reported as a hang, not take the suite with
+# it.  runner.py records a timeout in the rc column, which the comparator
+# counts as an error.
+TIMEOUT=${SHAVAR_TIMEOUT:-120}
 
-# calibrate_impl ID — measure what this implementation costs, and write
+# write_argv_files — materialise each implementation's invocation prefix as a
+# NUL-separated file.  Passing argv through a file rather than through the
+# shell means paths containing spaces cannot be mangled, and means runner.py
+# and oneshot.py take the command the same way.
+write_argv_files() {
+  for _i in $ALL_IMPLS; do
+    impl_argv "$_i" 2>/dev/null | tr '\n' '\0' > "$WORK/argv.$_i" || :
+  done
+  for _o in $ALL_ORACLES; do
+    oracle_argv "$_o" 2>/dev/null | tr '\n' '\0' > "$WORK/argv.$_o" || :
+  done
+}
+
+# impl_run ID ARGS... -> runs the implementation under the timeout.  stdout is
+# the implementation's stdout, exit status is its exit status (124 on timeout,
+# following the convention of timeout(1)).
+impl_run() {
+  _id=$1; shift
+  [ -s "$WORK/argv.$_id" ] || { mkdir -p "$WORK"; impl_argv "$_id" | tr '\n' '\0' > "$WORK/argv.$_id"; }
+  "$PYTHON" "$LIB/oneshot.py" --timeout "$TIMEOUT" --cmdfile "$WORK/argv.$_id" -- "$@"
+}
+
+# calibrate_impl ID — measure what this implementation costs and print
 #     id <TAB> base_ms <TAB> per_block_ms
-# to $WORK/cost.tsv.
 #
 # Sampling rates are derived from this rather than hardcoded, because guessing
 # which implementation is slow gets it wrong.  On the machine this was written
@@ -125,34 +167,25 @@ now_ms() { "$PYTHON" -c 'import time;print(int(time.time()*1000))'; }
 # difference in the opposite direction to the obvious guess.  Measuring also
 # means the harness keeps working as the implementations are optimised.
 calibrate_impl() {
-  _id=$1
-  _big=$("$PYTHON" -c 'print("ab"*512)')     # 4096 bits = 8 blocks
-  _t0=$(now_ms)
-  impl_run "$_id" hash 616263 24 >/dev/null 2>&1
-  impl_run "$_id" hash 616263 24 >/dev/null 2>&1
-  impl_run "$_id" hash 616263 24 >/dev/null 2>&1
-  _t1=$(now_ms)
-  impl_run "$_id" hash "$_big" 4096 >/dev/null 2>&1
-  _t2=$(now_ms)
-  "$PYTHON" - "$_id" "$_t0" "$_t1" "$_t2" <<'EOF'
-import sys
-i, t0, t1, t2 = sys.argv[1], *map(int, sys.argv[2:5])
-base = max((t1 - t0) / 3.0, 0.05)
-per = max((t2 - t1 - base) / 8.0, 0.0)
-print("%s\t%.3f\t%.3f" % (i, base, per))
-EOF
+  "$PYTHON" "$LIB/runner.py" --op calibrate --tag "$1" \
+      --cmdfile "$WORK/argv.$1" --timeout "${SHAVAR_CALIB_TIMEOUT:-30}"
 }
 
+# calibrate_all — calibrate every working implementation, concurrently.
+#
+# Note the directory: the per-implementation results go into cost.d/ and are
+# concatenated from there.  An earlier version wrote them as $WORK/cost.<id>
+# and ran `cat "$WORK"/cost.* > "$WORK/cost.tsv"`, whose glob matches its own
+# output file -- cat then reads back what it has just appended, forever.
 calibrate_all() {
-  : > "$WORK/cost.tsv"
+  mkdir -p "$WORK/cost.d"
   _pids=""
   for _i in $(impls_with_status ok); do
-    ( calibrate_impl "$_i" > "$WORK/cost.$_i" ) &
+    ( calibrate_impl "$_i" > "$WORK/cost.d/$_i" 2>/dev/null ) &
     _pids="$_pids $!"
   done
   for _p in $_pids; do wait "$_p"; done
-  cat "$WORK"/cost.* > "$WORK/cost.tsv" 2>/dev/null
-  rm -f "$WORK"/cost.[a-z]*
+  cat "$WORK/cost.d"/* > "$WORK/cost.tsv" 2>/dev/null || : > "$WORK/cost.tsv"
 }
 
 # cost_base ID / cost_block ID — measured costs in ms, with safe fallbacks.
@@ -181,6 +214,19 @@ oracle_desc() {
     shasum)                echo "$_p -a 256 [$("$_p" -v 2>/dev/null | head -1)]" ;;
     sha256sum)             echo "$_p [$("$_p" --version 2>/dev/null | head -1)]" ;;
     *)                     echo "$_p" ;;
+  esac
+}
+
+# oracle_argv ID -> invocation, one argument per line.  Each of these reads the
+# message from stdin and prints a line containing the digest; runner.py picks
+# the 64-hex token out of whatever framing the tool uses.
+oracle_argv() {
+  _p=$(oracle_path "$1")
+  case $1 in
+    ssl-libre|ssl-openssl) printf '%s\n' "$_p" dgst -sha256 ;;
+    shasum)                printf '%s\n' "$_p" -a 256 ;;
+    sha256sum)             printf '%s\n' "$_p" ;;
+    *)                     return 127 ;;
   esac
 }
 
@@ -249,6 +295,10 @@ discover_impls() {
       continue
     fi
 
+    # Freeze the invocation now that the prerequisites are known good -- for
+    # lean this must come after find_lean_bin, which is what discovers the path.
+    impl_argv "$id" | tr '\n' '\0' > "$WORK/argv.$id"
+
     # Shape-only smoke test.
     _out=$(impl_run "$id" hash 616263 24 2>"$WORK/smoke-$id.err")
     _rc=$?
@@ -316,6 +366,7 @@ discover_oracles() {
   for id in $ALL_ORACLES; do
     p=$(oracle_path "$id")
     if [ -x "$p" ] && printf '' | oracle_hash "$id" 2>/dev/null | grep -Eq '^[0-9a-f]{64}$'; then
+      oracle_argv "$id" | tr '\n' '\0' > "$WORK/argv.$id"
       printf '%s\tok\t%s\n' "$id" "$(oracle_desc "$id")" >> "$WORK/oracles.tsv"
     else
       printf '%s\tabsent\tnot executable or not answering: %s\n' "$id" "$p" >> "$WORK/oracles.tsv"
@@ -334,8 +385,12 @@ time_budget_ms() {
   case $2 in
     trace) [ "$1" = thorough ] && echo "${SHAVAR_TIME_TRACE_MS:-10000}" \
                                || echo "${SHAVAR_TIME_TRACE_MS:-1500}" ;;
-    *)     [ "$1" = thorough ] && echo "${SHAVAR_TIME_BUDGET_MS:-90000}" \
-                               || echo "${SHAVAR_TIME_BUDGET_MS:-2500}" ;;
+    # 400 s is chosen so that even the slowest implementation measured here
+    # covers all 1154 NIST vectors rather than a sample of them; the fast ones
+    # finish their share in a couple of seconds and the shards divide the wall
+    # clock by $JOBS.
+    *)     [ "$1" = thorough ] && echo "${SHAVAR_TIME_BUDGET_MS:-400000}" \
+                               || echo "${SHAVAR_TIME_BUDGET_MS:-1500}" ;;
   esac
 }
 
@@ -387,7 +442,14 @@ budget_for() {
 # always selects the same rows, so a failure found at budget 24 reproduces.
 subsample() {
   _in=$1; _out=$2; _b=$3
-  if [ "$_b" = all ]; then cp "$_in" "$_out"; return 0; fi
+  # A hard link rather than a copy: the NIST LongMsg input is 3.3 MB and there
+  # is one per implementation per phase, so copying costs tens of megabytes of
+  # pointless I/O per run.  Fall back to a copy if linking is not possible.
+  if [ "$_b" = all ]; then
+    rm -f "$_out"
+    ln "$_in" "$_out" 2>/dev/null || cp "$_in" "$_out"
+    return 0
+  fi
   if [ "$_b" -le 0 ] 2>/dev/null; then : > "$_out"; return 0; fi
   awk -v b="$_b" '
     NR == FNR { n++; next }
@@ -422,17 +484,19 @@ run_phase() {
         "$(cost_base "$_i")" "$(cost_block "$_i")" >> "$_d/budgets.tsv"
     [ -s "$_d/in-$_i.tsv" ] || { : > "$_d/$_i.tsv"; continue; }
     (
+      mkdir -p "$_d/parts-$_i"
       _jp=""
-      _n=$JOBS
       _s=0
-      while [ "$_s" -lt "$_n" ]; do
-        "$LIB/runhash.sh" "$_i" "$_d/in-$_i.tsv" "$_d/$_i.part$_s" "$_s" "$_n" &
+      while [ "$_s" -lt "$JOBS" ]; do
+        "$PYTHON" "$LIB/runner.py" --op hash --cmdfile "$WORK/argv.$_i" \
+            --inputs "$_d/in-$_i.tsv" --out "$_d/parts-$_i/$_s" \
+            --shard "$_s" --nshard "$JOBS" --timeout "$TIMEOUT" &
         _jp="$_jp $!"
         _s=$((_s + 1))
       done
       for _p in $_jp; do wait "$_p"; done
-      cat "$_d/$_i".part* 2>/dev/null | sort -n -k1,1 > "$_d/$_i.tsv"
-      rm -f "$_d/$_i".part*
+      cat "$_d/parts-$_i"/* 2>/dev/null | sort -n -k1,1 > "$_d/$_i.tsv"
+      rm -rf "$_d/parts-$_i"
     ) &
     _pids="$_pids $!"
   done
@@ -448,7 +512,9 @@ run_oracles() {
   _pids=""
   for _o in $(oracles_ok); do
     [ -s "$_d/in-oracles.tsv" ] || { : > "$_d/$_o.tsv"; continue; }
-    ( "$LIB/runoracle.sh" "$_o" "$_d/in-oracles.tsv" "$_d/$_o.tsv" ) &
+    ( "$PYTHON" "$LIB/runner.py" --op stdin --cmdfile "$WORK/argv.$_o" \
+        --inputs "$_d/in-oracles.tsv" --out "$_d/$_o.tsv" \
+        --timeout "$TIMEOUT" ) &
     _pids="$_pids $!"
   done
   for _p in $_pids; do wait "$_p"; done

@@ -17,8 +17,13 @@
 #
 # Exits nonzero if anything failed.  What it runs:
 #
+#   selfcheck   test the harness: inject a fault of each kind the harness
+#               claims to catch, and assert that it catches it
 #   constants   recompute H and K from the primes; check spec/SPEC.md's tables
 #               and each implementation's initial chaining value  (SPEC.md 9)
+#   contract    the CLI encoding itself: output shape, exit codes, and the
+#               required REJECTION of a final byte with nonzero trailing bits
+#                                                        (CLI.md, SPEC.md 5.1)
 #   nist        NIST CAVP SHAVS known-answer vectors, byte- and bit-oriented,
 #               plus each implementation's built-in selftest         (V5)
 #   crosstest   swept and random bit lengths across every implementation, with
@@ -30,7 +35,6 @@ set -u
 
 MODE=fast
 SEED=""
-EXTRA=""
 KEEP=0
 DO_NIST=1
 DO_CROSS=1
@@ -40,8 +44,11 @@ while [ $# -gt 0 ]; do
     fast|thorough) MODE=$1; shift ;;
     --mode)        MODE=$2; shift 2 ;;
     --seed)        SEED=$2; shift 2 ;;
-    --jobs)        JOBS=$2; EXTRA="$EXTRA --jobs $2"; shift 2 ;;
-    --impls)       EXTRA="$EXTRA --impls"; IMPLSEL=$2; shift 2 ;;
+    --jobs)        JOBS=$2; export SHAVAR_JOBS=$2; shift 2 ;;
+    # Passed to the sub-scripts through the environment rather than as an
+    # argument: "c py" is one option value, and in POSIX sh an unquoted
+    # expansion would split it into two arguments and break the parse.
+    --impls)       export SHAVAR_IMPLS=$2; shift 2 ;;
     --keep)        KEEP=1; shift ;;
     --skip-nist)   DO_NIST=0; shift ;;
     --skip-cross)  DO_CROSS=0; shift ;;
@@ -83,21 +90,19 @@ runpart() {
   fi
 }
 
-# shellcheck disable=SC2086
-if [ -n "${IMPLSEL:-}" ]; then SEL="--impls" ; else SEL="" ; fi
-
-runpart constants sh "$TESTS_DIR/constants.sh" --keep ${SEL:+$SEL} ${IMPLSEL:-}
+runpart selfcheck sh "$TESTS_DIR/selfcheck.sh"
+runpart constants sh "$TESTS_DIR/constants.sh" --keep
+runpart contract  sh "$TESTS_DIR/contract.sh"  --keep
 
 if [ "$DO_NIST" = 1 ]; then
-  runpart nist sh "$TESTS_DIR/nist.sh" --mode "$MODE" --keep --jobs "$JOBS" \
-      ${SEL:+$SEL} ${IMPLSEL:-}
+  runpart nist sh "$TESTS_DIR/nist.sh" --mode "$MODE" --keep --jobs "$JOBS"
 else
   warn "NIST phase skipped by request: obligation V5 is unchecked in this run"
 fi
 
 if [ "$DO_CROSS" = 1 ]; then
   runpart crosstest sh "$TESTS_DIR/crosstest.sh" --mode "$MODE" --seed "$SEED" \
-      --keep --jobs "$JOBS" ${SEL:+$SEL} ${IMPLSEL:-}
+      --keep --jobs "$JOBS"
 else
   warn "cross-test phase skipped by request: obligation V6 is unchecked in this run"
 fi

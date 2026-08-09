@@ -16,7 +16,7 @@
 set -u
 . "$(dirname "$0")/lib/common.sh"
 
-WANT_IMPLS=""
+WANT_IMPLS=${SHAVAR_IMPLS:-}
 KEEP=0
 while [ $# -gt 0 ]; do
   case $1 in

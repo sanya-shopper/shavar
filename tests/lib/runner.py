@@ -48,15 +48,17 @@ def read_inputs(path):
 
 
 def run(cmd, timeout, stdin_bytes=None):
-    """-> (rc_string, stdout_text)."""
+    """-> (rc_string, stdout_text, stderr_text)."""
     try:
-        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            input=stdin_bytes, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return "timeout", ""
+        return "timeout", "", "runner: no output within %gs\n" % timeout
     except OSError as e:
-        return "spawn-error(%s)" % e.errno, ""
-    return str(p.returncode), p.stdout.decode("utf-8", "replace")
+        return "spawn-error(%s)" % e.errno, "", "runner: cannot run %s: %s\n" % (cmd[0], e)
+    return (str(p.returncode),
+            p.stdout.decode("utf-8", "replace"),
+            p.stderr.decode("utf-8", "replace"))
 
 
 def first_hex64(text):
@@ -84,14 +86,19 @@ def main():
     ap.add_argument("--timeout", type=float, default=60.0)
     ap.add_argument("--tracedir")
     ap.add_argument("--tag", default="impl")
+    ap.add_argument("--cmdfile", help="NUL-separated argv prefix")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     args = ap.parse_args()
 
-    cmd = args.cmd
-    if cmd and cmd[0] == "--":
-        cmd = cmd[1:]
+    if args.cmdfile:
+        with open(args.cmdfile, "rb") as fh:
+            cmd = [a.decode() for a in fh.read().split(b"\0") if a]
+    else:
+        cmd = args.cmd
+        if cmd and cmd[0] == "--":
+            cmd = cmd[1:]
     if not cmd:
-        sys.exit("runner.py: no command given after --")
+        sys.exit("runner.py: no command given (use --cmdfile or -- CMD ...)")
 
     # ------------------------------------------------------------ calibrate --
     if args.op == "calibrate":
@@ -100,7 +107,7 @@ def main():
         # needed because they differ by orders of magnitude between languages.
         t0 = time.time()
         for _ in range(3):
-            rc, _o = run(cmd + ["hash", "616263", "24"], args.timeout)
+            run(cmd + ["hash", "616263", "24"], args.timeout)
         t1 = time.time()
         run(cmd + ["hash", "ab" * 512, "4096"], args.timeout)
         t2 = time.time()
@@ -116,24 +123,31 @@ def main():
         os.makedirs(args.tracedir, exist_ok=True)
         for f in rows:
             key, hx, nbits, blockidx = f[0], f[1], f[2], (f[3] if len(f) > 3 else "0")
-            rc, out = run(cmd + ["trace", hx, nbits, blockidx], args.timeout)
-            with open(os.path.join(args.tracedir, "%s.%s" % (args.tag, key)), "w") as fh:
+            rc, out, errtext = run(cmd + ["trace", hx, nbits, blockidx], args.timeout)
+            base = os.path.join(args.tracedir, "%s.%s" % (args.tag, key))
+            with open(base, "w") as fh:
                 fh.write(out)
-            with open(os.path.join(args.tracedir, "%s.%s.rc" % (args.tag, key)), "w") as fh:
+            with open(base + ".rc", "w") as fh:
                 fh.write(rc + "\n")
+            with open(base + ".err", "w") as fh:
+                fh.write(errtext)
         return 0
 
     with open(args.out, "w") as fh:
         for f in rows:
             key, nbits, hx = f[0], f[1], f[2]
             if args.op == "hash":
-                rc, out = run(cmd + ["hash", hx, nbits], args.timeout)
+                rc, out, _e = run(cmd + ["hash", hx, nbits], args.timeout)
                 dig = out.split("\n")[0].strip()
             else:  # stdin: an external oracle, fed raw bytes
                 raw = b"" if hx == "-" or nbits == "0" else bytes.fromhex(hx)
-                rc, out = run(cmd, args.timeout, stdin_bytes=raw)
+                rc, out, _e = run(cmd, args.timeout, stdin_bytes=raw)
                 dig = first_hex64(out)
             fh.write("%s\t%s\t%s\n" % (key, rc, dig or "-"))
+            # Flush per row.  A long phase otherwise writes nothing until the
+            # shard finishes, which makes an in-flight run impossible to
+            # observe and throws away partial results if it is interrupted.
+            fh.flush()
     return 0
 
 

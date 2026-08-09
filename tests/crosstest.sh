@@ -8,8 +8,9 @@
 #
 # What it does, in order:
 #
-#   1. Discovers which of the seven implementations are present.  They are
-#      being written in parallel, so absence is normal and is reported, not
+#   1. Discovers which builds are present -- the seven implementations, with
+#      the shell one run under both bash and zsh, so eight ids in all.  They
+#      are being written in parallel, so absence is normal and is reported, not
 #      treated as a pass.  An implementation that is present but cannot answer
 #      the CLI contract is reported as BROKEN and fails the run.
 #
@@ -46,7 +47,7 @@ set -u
 
 MODE=fast
 SEED=""
-WANT_IMPLS=""
+WANT_IMPLS=${SHAVAR_IMPLS:-}
 KEEP=0
 
 while [ $# -gt 0 ]; do
@@ -208,10 +209,8 @@ TD="$WORK/traces"; mkdir -p "$TD"
 tpids=""
 for i in $IMPLS; do
   ( subsample "$TSAMP" "$TD/in-$i.tsv" "$(budget_for "$i" trace "$MODE")"
-    while IFS='	' read -r k hx nb bi; do
-      impl_run "$i" trace "$hx" "$nb" "$bi" > "$TD/$i.$k" 2>"$TD/$i.$k.err"
-      printf '%s\n' "$?" > "$TD/$i.$k.rc"
-    done < "$TD/in-$i.tsv" ) &
+    "$PYTHON" "$LIB/runner.py" --op trace --tag "$i" --cmdfile "$WORK/argv.$i" \
+        --inputs "$TD/in-$i.tsv" --tracedir "$TD" --timeout "$TIMEOUT" ) &
   tpids="$tpids $!"
 done
 for p in $tpids; do wait "$p"; done

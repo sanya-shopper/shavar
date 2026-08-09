@@ -14,9 +14,12 @@ Columns:
                or an external oracle.  This is the number that means "checked
                against something outside this repository".
     agreed     digests with no authority available (sub-byte lengths outside
-               the NIST files) where every implementation present gave the same
-               answer.  Real evidence, but weaker: it cannot catch a shared
-               misreading of FIPS 180-4.
+               the NIST files) where two or more implementations answered and
+               all gave the same answer.  Real evidence, but weaker: it cannot
+               catch a shared misreading of FIPS 180-4.
+    lone       no authority, and only this implementation ran the row -- so
+               nothing was compared.  Kept out of `agreed` deliberately: it is
+               coverage of the input, not evidence of correctness.
     FAILED     disagreed with an authority.
     disputed   implementations disagreed among themselves with no authority to
                settle it.  Blame is not assigned by majority vote.
@@ -58,9 +61,9 @@ def main():
     agg = collections.defaultdict(collections.Counter)
     phases = []
     for row in read_tsv(os.path.join(args.work, "summary.tsv")):
-        if len(row) != 10:
+        if len(row) != 11:
             continue
-        phase, name, is_auth, p, a, f, d, e, s, o = row
+        phase, name, is_auth, p, a, f, d, e, s, o, lo = row
         if phase not in phases:
             phases.append(phase)
         c = agg[name]
@@ -71,6 +74,7 @@ def main():
         c["error"] += int(e)
         c["skipped"] += int(s)
         c["offered"] += int(o)
+        c["lone"] += int(lo)
         if int(is_auth):
             c["authority"] = 1
 
@@ -81,10 +85,10 @@ def main():
     print("phases run: %s" % (", ".join(phases) if phases else "(none)"))
     print()
 
-    fmt = "  %-12s %-8s %9s %9s %8s %9s %7s %9s"
-    print(fmt % ("impl", "status", "verified", "agreed", "FAILED",
+    fmt = "  %-12s %-8s %9s %8s %7s %8s %9s %7s %8s"
+    print(fmt % ("impl", "status", "verified", "agreed", "lone", "FAILED",
                  "disputed", "error", "skipped"))
-    print("  " + "-" * 74)
+    print("  " + "-" * 78)
 
     bad = 0
     tested = []
@@ -93,36 +97,36 @@ def main():
         c = agg.get(name)
         if status == "ok" and c:
             tested.append(name)
-            print(fmt % (name, "ok", c["verified"], c["agreed"], c["failed"],
-                         c["disputed"], c["error"], c["skipped"]))
+            print(fmt % (name, "ok", c["verified"], c["agreed"], c["lone"],
+                         c["failed"], c["disputed"], c["error"], c["skipped"]))
             bad += c["failed"] + c["disputed"] + c["error"]
         elif status == "ok":
             tested.append(name)
-            print(fmt % (name, "ok", 0, 0, 0, 0, 0, 0))
+            print(fmt % (name, "ok", 0, 0, 0, 0, 0, 0, 0))
         elif status == "broken":
             skipped.append((name, "BROKEN", reason))
-            print(fmt % (name, "BROKEN", "-", "-", "-", "-", "-", "-"))
+            print(fmt % (name, "BROKEN", *(["-"] * 7)))
             bad += 1
         else:
             skipped.append((name, "absent", reason))
-            print(fmt % (name, "absent", "-", "-", "-", "-", "-", "-"))
+            print(fmt % (name, "absent", *(["-"] * 7)))
 
     print()
     print("  authorities — the yardsticks, not competitors.  'offered' is how")
     print("  many rows each supplied a ground-truth digest for.")
     print("  " + "-" * 74)
-    afmt = "  %-12s %-8s %9s %-9s %8s %-9s %7s %9s"
-    print(afmt % ("authority", "status", "offered", "", "FAILED", "",
+    afmt = "  %-12s %-8s %9s %8s %7s %8s %9s %7s %8s"
+    print(afmt % ("authority", "status", "offered", "", "", "FAILED", "",
                   "error", "skipped"))
     for name, (status, desc) in list(oracles.items()) + \
             ([("NIST", ("ok", "tests/vectors"))] if agg.get("NIST") else []):
         c = agg.get(name)
         if status == "ok" and c:
-            print(afmt % (name, "ok", c["offered"], "", c["failed"], "",
+            print(afmt % (name, "ok", c["offered"], "", "", c["failed"], "",
                           c["error"], c["skipped"]))
             bad += c["failed"] + c["error"]
         else:
-            print(afmt % (name, status, "-", "", "-", "", "-", "-"))
+            print(afmt % (name, status, "-", "", "", "-", "", "-", "-"))
 
     if skipped:
         print()

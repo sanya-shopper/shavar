@@ -4,7 +4,7 @@
 Usage:
     compare.py --phase NAME --inputs INPUTS.tsv
                --col name=RESULTS.tsv [--col ...]
-               [--authority name[,name...]] [--reference name]
+               [--authority name[,name...]]
                [--summary SUMMARY.tsv] [--max-report N]
 
 Every column file has the same shape, `key <TAB> rc <TAB> digest`, whether it
@@ -21,9 +21,12 @@ different kinds of evidence:
 
     pass       agreed with an authority (NIST digest, or external oracle)
     fail       disagreed with an authority -- this is a real, attributable bug
-    agree      no authority for this row, and every column that answered gave
-               the same digest.  Evidence, but weaker: seven implementations
-               can be wrong together.
+    agree      no authority for this row, two or more columns answered, and
+               they all gave the same digest.  Evidence, but weaker: eight
+               implementations can be wrong together.
+    lone       no authority, and only one column answered -- so nothing was
+               compared at all.  Kept separate from `agree` so the summary
+               cannot count a digest as evidence for itself.
     disputed   no authority, and the columns split into groups.  Blame is NOT
                assigned by majority vote, because a majority of six agreeing
                transcriptions of the same misreading is exactly the failure
@@ -87,7 +90,6 @@ def main():
     ap.add_argument("--inputs", required=True)
     ap.add_argument("--col", action="append", default=[])
     ap.add_argument("--authority", default="")
-    ap.add_argument("--reference", default="")
     ap.add_argument("--summary")
     ap.add_argument("--max-report", type=int, default=12)
     args = ap.parse_args()
@@ -98,7 +100,6 @@ def main():
         name, _, path = spec.partition("=")
         cols[name] = load(path)
     authorities = [a for a in args.authority.split(",") if a and a in cols]
-    peers = [c for c in cols if c not in authorities]
 
     stat = collections.OrderedDict(
         (c, collections.Counter()) for c in cols)
@@ -172,7 +173,14 @@ def main():
             groups = collections.OrderedDict()
             for name, dig in answers.items():
                 groups.setdefault(dig, []).append(name)
-            if len(groups) == 1:
+            if len(answers) == 1:
+                # Exactly one column answered and there is no authority, so
+                # nothing was actually compared.  Counting this as agreement
+                # would be counting a digest as evidence for itself, which is
+                # how a summary ends up overstating its own coverage.
+                for name in answers:
+                    stat[name]["lone"] += 1
+            elif len(groups) == 1:
                 for name in answers:
                     stat[name]["agree"] += 1
             else:
@@ -192,16 +200,16 @@ def main():
     width = max([len(c) for c in cols] + [6])
     print("phase %s: %d input rows, %d compared, %d rows with a problem"
           % (args.phase, len(inputs), n_rows_checked, n_rows_bad))
-    hdr = ("  %-*s %8s %8s %8s %8s %8s %8s %8s"
-           % (width, "column", "pass", "agree", "fail", "disputed", "error",
-              "skipped", "offered"))
+    hdr = ("  %-*s %8s %8s %8s %8s %8s %8s %8s %8s"
+           % (width, "column", "pass", "agree", "lone", "fail", "disputed",
+              "error", "skipped", "offered"))
     print(hdr)
     print("  " + "-" * (len(hdr) - 2))
     for name in cols:
         s = stat[name]
         tag = " (authority)" if name in authorities else ""
-        print("  %-*s %8d %8d %8d %8d %8d %8d %8d%s"
-              % (width, name, s["pass"], s["agree"], s["fail"],
+        print("  %-*s %8d %8d %8d %8d %8d %8d %8d %8d%s"
+              % (width, name, s["pass"], s["agree"], s["lone"], s["fail"],
                  s["disputed"], s["error"], s["skipped"], s["offered"], tag))
 
     if conflicts:
@@ -218,10 +226,10 @@ def main():
         with open(args.summary, "a") as fh:
             for name in cols:
                 s = stat[name]
-                fh.write("%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n"
+                fh.write("%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n"
                          % (args.phase, name, 1 if name in authorities else 0,
                             s["pass"], s["agree"], s["fail"], s["disputed"],
-                            s["error"], s["skipped"], s["offered"]))
+                            s["error"], s["skipped"], s["offered"], s["lone"]))
 
     bad = sum(stat[c]["fail"] + stat[c]["disputed"] + stat[c]["error"] for c in cols)
     return 1 if (bad or conflicts) else 0

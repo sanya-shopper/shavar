@@ -32,7 +32,7 @@ set -u
 . "$(dirname "$0")/lib/common.sh"
 
 MODE=fast
-WANT_IMPLS=""
+WANT_IMPLS=${SHAVAR_IMPLS:-}
 KEEP=0
 while [ $# -gt 0 ]; do
   case $1 in
@@ -63,6 +63,20 @@ if [ ! -f "$VECTORS/bit/SHA256ShortMsg.rsp" ] || [ ! -f "$VECTORS/byte/SHA256Sho
   err "Run tests/fetch-vectors.sh (needs network).  No expected digests are"
   err "invented in their absence: without the vectors, V5 is simply unchecked."
   exit 1
+fi
+
+# Confirm the committed vectors are the ones that were fetched.  A corrupted
+# .rsp would otherwise show up as an implementation bug, which is exactly the
+# wrong conclusion to draw.
+if [ -f "$VECTORS/SHA256SUMS" ]; then
+  if ( cd "$VECTORS" && shasum -a 256 -c SHA256SUMS ) >"$WORK/vecsum.log" 2>&1; then
+    say "checksums: all 4 .rsp files match tests/vectors/SHA256SUMS"
+  else
+    err "tests/vectors/SHA256SUMS does not match the files on disk:"
+    sed 's/^/  /' "$WORK/vecsum.log" >&2
+    err "Refusing to report results against vectors of unknown provenance."
+    exit 1
+  fi
 fi
 
 ensure_discovered

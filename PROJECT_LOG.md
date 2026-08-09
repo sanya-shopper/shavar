@@ -6,6 +6,73 @@ preserved alongside the history of code.
 
 ---
 
+## 2026-08-09 — The C implementation as a CWEB literate program
+
+`cweb/shavar-cweb.w` is a single Knuth/Levy CWEB file that `ctangle` turns into
+the whole C program — `shavar-cweb.c`, `shavar.h` and `main.c`, via `@(file@>`
+output sections — and that `cweave` turns into a 33-page typeset document,
+`cweb/shavar-cweb.pdf`. It covers the library *and* the driver, and it explains
+them in the order a reader should meet them: the 2D recurrence, the message
+schedule, padding and the arbitrary-bit-length rule, then the compression
+function and the plumbing. The prose absorbs the long comments that were in
+`c/shavar.c` and adds three TikZ figures — the width-4 window over the two
+tracks, the data dependence of one round, and the padded-message layout.
+
+`c/` is untouched. This is a second presentation, not a replacement, and the
+interesting question is therefore whether the tangled output is *the same
+program*. `cweb/test_cweb.sh` answers it three ways:
+
+- **Token identity.** Both sides through `cc -E -P` and then `cweb/ctokens.py`,
+  which reduces the result to one token per line with string and character
+  literals kept verbatim. The streams are identical — 3821 tokens for the
+  library, 11778 for the driver. This is the leg that catches drift in code no
+  test executes.
+- **Observational identity.** Digests over 217 messages (189 not byte-aligned),
+  full per-round traces record for record (344 records a block), reduced-round
+  output at ten round counts including 0 and 64, and fourteen error paths
+  compared on exit status, stdout *and* stderr.
+- **The repository's own suite.** A four-line change to `tests/lib/common.sh`
+  adds `SHAVAR_C_BIN`, which points the harness at a different build of the C
+  implementation. With it set, `tests/nist.sh` runs the tangled binary against
+  all 1154 NIST CAVP vectors and `tests/run.sh fast` runs it against the other
+  six implementations, on digests and traces. Both pass.
+
+The drift detector is itself tested: the script injects a one-digit change into
+`K[0]` and requires the comparison to fail.
+
+**Non-obvious things learned.**
+
+- **CWEB was already installed.** `ctangle` and `cweave` ship with MacTeX and
+  TeX Live (4.12.2 here), as does `cwebmac.tex`. Nothing needed installing on a
+  machine that could already build `doc/shavar.pdf`.
+- **A bare `|` in the TeX part of a section starts inline-code mode.** So the C
+  bitwise-or operator cannot be written in prose — `|(x >> n) | (x << (32-n))|`
+  silently becomes *code, prose, code* and swallows everything up to the next
+  bar, which surfaced as `! Never defined: <Rotate right>` sixty lines away.
+  TikZ's `|<->|` arrow syntax breaks the same way. Both diagnostics point
+  nowhere near the cause.
+- **A section name broken across a line** inside prose also yields a spurious
+  `Never defined`.
+- **CWEB has no way to cross-reference a starred (chapter) section.** It
+  hyperlinks references to named *code* sections automatically, and that covers
+  most of what one wants, but chapters have only the number `cweave` assigns.
+  The limbo section now defines a `\slabel`/`\secref` pair — a 12-line plain-TeX
+  reimplementation of LaTeX's `\label`/`\ref`, writing a `.lbl` file on pass one
+  and reading it on pass two. An unresolved key renders as `??` deliberately,
+  which is what makes the PDF test's `??` check mean anything: without a
+  reference mechanism that check is vacuous. 49 chapter references resolve.
+- **The `??` check found the document referring to itself.** The Testing chapter
+  originally said the PDF "must contain no literal `??`" — and thereby contained
+  one, and failed its own test. Rewritten to describe the pair without printing
+  it.
+- **The first draft of the round-dependence figure was wrong**, and only looking
+  at the rendered page caught it: the heavy arrow for `A[t-4] → E[t]`, the one
+  edge the figure exists to highlight, was drawn from `A[t-4]` to `E[t-4]`. A
+  diagram is an assertion and can be false in exactly the way a sentence can.
+- **pdfTeX packs link annotations into compressed object streams**, so
+  `grep /GoTo` on the PDF finds nothing even when the links are there. The test
+  inflates the streams before counting; there are 668.
+
 ## 2026-08-09 — Project defined: SHA-256 in seven languages, as a 2D recurrence
 
 **What this is.** One algorithm — SHA-256 — implemented seven times, in C99,

@@ -55,12 +55,14 @@ to the `E` track.
 | `spec/SPEC.md` | the normative specification — read this first |
 | `spec/CLI.md` | the uniform command-line contract all seven obey |
 | `c/` | C99 reference: `.a` + shared library, zero allocations |
+| `cweb/` | the same C as a CWEB **literate program**, tangled and proved token-identical to `c/` |
 | `lean/` | Lean 4 implementation **and machine-checked proofs** |
 | `py/ pl/ scm/ js/ sh/` | the other implementations, one directory each |
 | `js/index.html` | interactive step-debugger, runs from `file://` in Safari |
 | `tests/` | cross-testing harness + 1154 NIST CAVP vectors |
 | `research/` | differential propagation tooling |
 | `doc/shavar.pdf` | comparative write-up: what each language makes hard |
+| `cweb/shavar-cweb.pdf` | the C implementation typeset as prose, with cross-references and an index |
 
 ## Ground rules
 
@@ -107,7 +109,8 @@ instrument and a weak oracle, and the tooling says so on every run.
 
 1. `spec/SPEC.md` — the mathematics, and why this formulation
 2. `doc/shavar.pdf` — the comparison, and the surprises
-3. `c/shavar.c` — the shortest and most direct implementation
+3. `c/shavar.c` — the shortest and most direct implementation, or
+   `cweb/shavar-cweb.pdf` for the same code explained line by line
 4. `lean/Shavar/Equiv.lean` — the proof that all of this is still SHA-256
 5. `PROJECT_LOG.md` — how it was built, including what went wrong
 

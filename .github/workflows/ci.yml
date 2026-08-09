@@ -198,6 +198,41 @@ jobs:
       - name: Cross-implementation agreement (digests and full traces)
         run: bash tests/run.sh fast
 
+  # ---------------------------------------------------------------- CWEB
+  cweb:
+    name: "CWEB: tangle, prove equivalence with c/, weave the PDF"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install CWEB and plain TeX
+        # ctangle and cweave are the Debian/Ubuntu `cweb` package. cwebmac.tex
+        # lives under tex/plain/ and therefore in texlive-plain-generic;
+        # texlive-pictures supplies PGF/TikZ, which the diagrams use through
+        # its plain-TeX interface.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cweb texlive-base texlive-binaries \
+            texlive-plain-generic texlive-pictures texlive-fonts-recommended \
+            poppler-utils
+          ctangle --version | head -1
+          cweave --version | head -1
+          kpsewhich cwebmac.tex || echo "::warning::cwebmac.tex not found; the weave half will report itself skipped"
+      - name: Build the hand-written C, which is the equivalence baseline
+        run: make -C c shavar
+      - name: Tangle, prove equivalence, weave, and test the PDF
+        # --quick drops only the cross-implementation leg, which the
+        # `implementations` job above already runs against c/. The NIST CAVP
+        # known-answer vectors are still run against the *tangled* binary here,
+        # so the literate version is checked against an external authority and
+        # not only against its sibling.
+        run: bash cweb/test_cweb.sh --quick
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shavar-cweb-pdf
+          path: cweb/shavar-cweb.pdf
+          if-no-files-found: ignore
+
   # ---------------------------------------------------------------- Lean
   lean:
     name: "Lean 4: build and check proofs"

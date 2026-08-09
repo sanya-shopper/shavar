@@ -31,3 +31,19 @@ doc/*.fls
 doc/*.fdb_latexmk
 doc/*.run.xml
 doc/*.synctex.gz
+
+# CWEB. shavar-cweb.w is the source; everything ctangle and cweave derive from
+# it is a build output. In particular the tangled C files here are regenerated
+# on every build -- edit the .w, never these. shavar-cweb.pdf is a tested
+# artefact and IS committed, on the same reasoning as doc/shavar.pdf.
+cweb/shavar-cweb.c
+cweb/shavar.h
+cweb/main.c
+cweb/shavar
+cweb/shavar-cweb.tex
+cweb/shavar-cweb.idx
+cweb/shavar-cweb.scn
+cweb/shavar-cweb.toc
+cweb/shavar-cweb.log
+cweb/shavar-cweb.lbl
+cweb/shavar-cweb.pgf

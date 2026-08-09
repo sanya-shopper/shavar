@@ -56,6 +56,15 @@ BASH_BIN=${SHAVAR_BASH:-bash}
 ZSH_BIN=${SHAVAR_ZSH:-zsh}
 CC_BIN=${SHAVAR_CC:-clang}
 
+# Which build of the C implementation to test.  Normally the binary the
+# Makefile produces in c/.  SHAVAR_C_BIN points the harness at a different
+# build of the same program without changing anything else: cweb/test_cweb.sh
+# sets it to the binary produced by `ctangle`-ing cweb/shavar-cweb.w, so the
+# literate version is checked by this suite rather than by a parallel one.
+# When it is set the C build step is skipped, since the caller supplied the
+# binary.
+C_BIN=${SHAVAR_C_BIN:-$ROOT/c/shavar}
+
 # The full roster, in report order.  Missing ones are reported as skipped.
 ALL_IMPLS="c py pl scm js sh shz lean"
 
@@ -85,7 +94,8 @@ hdr()  { printf '\n%s== %s ==%s\n' "$C_BLD" "$*" "$C_OFF"; }
 # impl_desc ID -> one-line human description of how the impl is invoked.
 impl_desc() {
   case $1 in
-    c)    echo "$ROOT/c/shavar (C99, built with make/clang)" ;;
+    c)    if [ -n "${SHAVAR_C_BIN:-}" ]; then echo "$C_BIN (C99, caller-supplied build)";
+          else echo "$C_BIN (C99, built with make/clang)"; fi ;;
     py)   echo "$PYTHON $ROOT/py/shavar.py" ;;
     pl)   echo "$PERL $ROOT/pl/shavar.pl" ;;
     scm)  echo "$CHIBI $ROOT/scm/shavar.scm" ;;
@@ -105,7 +115,7 @@ impl_desc() {
 # the command to lib/runner.py, which supplies the timeout and the loop.
 impl_argv() {
   case $1 in
-    c)    printf '%s\n' "$ROOT/c/shavar" ;;
+    c)    printf '%s\n' "$C_BIN" ;;
     py)   printf '%s\n' "$PYTHON" "$ROOT/py/shavar.py" ;;
     pl)   printf '%s\n' "$PERL" "$ROOT/pl/shavar.pl" ;;
     scm)  printf '%s\n' "$CHIBI" "$ROOT/scm/shavar.scm" ;;
@@ -318,6 +328,13 @@ discover_impls() {
 # build_c — build the C implementation into $ROOT/c/shavar.  Uses the repo's
 # Makefile when there is one, otherwise the documented clang line.
 build_c() {
+  # A caller-supplied binary is used as it is; building over it would defeat
+  # the point of pointing the harness somewhere else.
+  if [ -n "${SHAVAR_C_BIN:-}" ]; then
+    [ -x "$C_BIN" ] && return 0
+    echo "SHAVAR_C_BIN is set but $C_BIN is not executable" > "$WORK/build-c.log"
+    return 1
+  fi
   if [ -f "$ROOT/c/Makefile" ]; then
     ( cd "$ROOT/c" && make ) >"$WORK/build-c.log" 2>&1 && [ -x "$ROOT/c/shavar" ] && return 0
   fi

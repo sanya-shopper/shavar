@@ -205,15 +205,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install CWEB and plain TeX
-        # ctangle and cweave are the Debian/Ubuntu `cweb` package. cwebmac.tex
-        # lives under tex/plain/ and therefore in texlive-plain-generic;
-        # texlive-pictures supplies PGF/TikZ, which the diagrams use through
-        # its plain-TeX interface.
+        # There is no `cweb` package on Ubuntu 24.04. ctangle and cweave are
+        # web2c programs and ship in texlive-binaries; cwebmac.tex is in
+        # texlive-extra-utils (not, despite the path tex/plain/cweb/, in
+        # texlive-plain-generic); texlive-pictures supplies PGF/TikZ, which
+        # the diagrams use through its plain-TeX interface.
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq cweb texlive-base texlive-binaries \
-            texlive-plain-generic texlive-pictures texlive-fonts-recommended \
-            poppler-utils
+          sudo apt-get install -y -qq texlive-base texlive-binaries \
+            texlive-extra-utils texlive-plain-generic texlive-pictures \
+            texlive-fonts-recommended poppler-utils
           ctangle --version | head -1
           cweave --version | head -1
           kpsewhich cwebmac.tex || echo "::warning::cwebmac.tex not found; the weave half will report itself skipped"

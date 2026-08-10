@@ -533,8 +533,8 @@ uint32_t shavar_Sigma1(uint32_t x);
 uint32_t shavar_sigma0(uint32_t x);
 uint32_t shavar_sigma1(uint32_t x);
 
-void shavar_compress(uint32_t h[8], const unsigned char block[64], int rounds,
-                     shavar_trace *tr);
+int shavar_compress(uint32_t h[8], const unsigned char block[64], int rounds,
+                    shavar_trace *tr);
 
 int shavar_hash(const unsigned char *msg, uint64_t nbits,
                 unsigned char out[SHAVAR_DIGEST_BYTES]);
@@ -689,36 +689,51 @@ is\/} the state; there is no cheaper representation to fall back to.
 prerequisites for free-start and reduced-round analysis.
 
 @<The compression function@>=
-void shavar_compress(uint32_t h[8], const unsigned char block[64], int rounds,
-                     shavar_trace *tr) {
+int shavar_compress(uint32_t h[8], const unsigned char block[64], int rounds,
+                    shavar_trace *tr) {
     shavar_trace local;
     shavar_trace *s = tr ? tr : &local;
 
     int t;
 
-    @<Clamp the round count and record the incoming chaining value@>@;
+    @<Check the round count and record the incoming chaining value@>@;
     @<Build the message schedule@>@;
     @<Seed the two tracks@>@;
     @<Run the recurrence@>@;
     @<Feed forward@>@;
 
     for (t = 0; t < 8; t++) s->h_out[t] = h[t];
+    return 0;
 }
 
-@ The clamp here is defensive, not the specification of the valid range. The
-command-line contract requires that a round count outside $0\ldots64$ be
-{\it rejected\/} with a diagnostic, not clamped, and that rejection happens in
-|@<Parsing the round count@>| before this function is ever called. The two
-behaviours differ in exactly the case that matters: clamping makes a request
-that means nothing produce a correct-looking SHA-256 digest.
+@ {\bf The round count is checked here, not clamped, and this is the second
+time that decision has had to be made.}
+
+This section used to begin \.{if (rounds > SHAVAR\_ROUNDS) rounds =
+SHAVAR\_ROUNDS;}, and the prose that accompanied it argued that the clamp was
+merely defensive because the command-line contract already required
+|@<Parsing the round count@>| to reject an out-of-range count before this
+function could be reached. That argument is sound about the {\it driver\/} and
+false about everything else: a caller who links against the library never goes
+near the driver's parser, and for that caller the clamp was the whole of the
+policy. Asking for one hundred rounds returned a genuine SHA-256 digest and a
+success status, which is precisely the confidently-wrong output the driver's
+parser exists to prevent.
+
+The failure is a general one and worth naming. A check placed where a bug was
+{\it observed\/} rather than where it {\it lives\/} leaves every other path to
+the same bug open, and the surviving paths are the ones nobody is looking at.
+\.{spec/SPEC.md} \S6.1 now states the range as a property of the library
+boundary, and |shavar_compress| returns $-1$ rather than inventing an
+interpretation. \.{tests/rounds.sh} checks that all seven implementations do
+the same thing, because nothing in the repository could reach this call before.
 
 Zero rounds is legal and is not the same as an error. It is the degenerate case
 in which no round runs and the block contributes only its feed-forward, which
 isolates the seeding and feed-forward logic from the round function entirely.
 
-@<Clamp the round count and record the incoming chaining value@>=
-if (rounds < 0) rounds = 0;
-if (rounds > SHAVAR_ROUNDS) rounds = SHAVAR_ROUNDS;
+@<Check the round count and record the incoming chaining value@>=
+if (rounds < 0 || rounds > SHAVAR_ROUNDS) return -1;
 s->rounds = rounds;
 
 for (t = 0; t < 8; t++) s->h_in[t] = h[t];
@@ -928,7 +943,7 @@ int shavar_hash_ex(const unsigned char *msg, uint64_t nbits, const uint32_t iv[8
 
     for (i = 0; i < nblocks; i++) {
         if (shavar_padded_block(msg, nbits, i, block) != 0) return -1;
-        shavar_compress(h, block, rounds, NULL);
+        if (shavar_compress(h, block, rounds, NULL) != 0) return -1;
     }
 
     for (j = 0; j < 8; j++) {
@@ -1204,8 +1219,10 @@ static int parse_u64(const char *s, uint64_t *out) {
     return 0;
 }
 
-@ The valid range for the round count is $0\ldots64$ inclusive, and it is
-enforced here rather than clamped in |@<The compression function@>|.
+@ The valid range for the round count is $0\ldots64$ inclusive. It is checked
+here so that the diagnostic can name the offending argument, and {\it also\/}
+in |@<The compression function@>|, so that a caller who links against the
+library rather than running this program gets the same refusal.
 
 This is the second thing in this program that was changed after the fact, and
 the reason is worth recording alongside the rotation of |@<Word primitives@>|. An
@@ -1213,6 +1230,11 @@ earlier version used |atoi| and let |shavar_compress| clamp, which meant that
 \.{hash <msg> <n> 100} printed a perfectly good SHA-256 digest in answer to a
 request that means nothing. Confidently wrong output of that kind is worse than
 an error message. Rejecting is the only honest response.
+
+That fix was applied here, in the parser, and for a while that was all. The
+library kept clamping, so the honest response was the driver's alone and every
+other caller still got the digest. The second half of the repair is described
+in |@<The compression function@>|.
 
 The boundary is also where independent implementations of the same
 specification diverged: one of the seven rejected a round count of zero, and
@@ -1337,7 +1359,10 @@ static int cmd_trace(const char *hex, const char *bits, const char *idxstr,
             fprintf(stderr, "shavar: nonzero trailing bits in final byte\n");
             return 2;
         }
-        shavar_compress(h, block, rounds, &tr);
+        if (shavar_compress(h, block, rounds, &tr) != 0) {
+            fprintf(stderr, "shavar: rounds must be 0..%d\n", SHAVAR_ROUNDS);
+            return 2;
+        }
     }
 
     @<Emit the trace records@>@;

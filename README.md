@@ -75,7 +75,9 @@ idiom budget on it, and that choice shapes everything else in the file.)
 Test tooling is exempt and uses whatever it likes.
 
 All seven support **arbitrary bit lengths**, not just whole bytes; a
-**caller-supplied chaining value**; **reduced round counts** — the last two
+**caller-supplied chaining value**; **reduced round counts** (0–64, and
+outside that range every implementation *rejects* rather than clamping —
+`SPEC.md` §6.1) — the last two
 unreachable from a normal hashing API and both prerequisites for free-start
 and reduced-round analysis — and the **proof-of-work comparison** of
 `SPEC.md` §10.
@@ -105,6 +107,10 @@ Verified in CI on every push (45 jobs):
 - 36 compiler configurations; Lean build fails on any `sorry`.
 - **The proof-of-work byte order**, checked in all eight builds against
   vectors anchored to the Bitcoin genesis block, and *proved* in Lean.
+- **The library round-count contract**, checked in all eight builds. Library
+  entry points are tested directly, because a check that only the CLI enforces
+  is not a property of the library — which is exactly how five of the seven
+  came to disagree about it undetected.
 
 **What is proved, versus tested.** The equivalence of the two forms, the
 padding length and injectivity theorems, and the proof-of-work byte order are

@@ -97,6 +97,9 @@ runpart contract  sh "$TESTS_DIR/contract.sh"  --keep
 # it is the only phase that reaches the proof-of-work comparison at all, since
 # that has no CLI verb for crosstest.sh to drive.
 runpart pow       sh "$TESTS_DIR/pow.sh"
+# V8. Also library-only, and for the same reason invisible to crosstest.sh:
+# the CLI rejects an out-of-range round count before the library sees it.
+runpart rounds    sh "$TESTS_DIR/rounds.sh"
 
 if [ "$DO_NIST" = 1 ]; then
   runpart nist sh "$TESTS_DIR/nist.sh" --mode "$MODE" --keep --jobs "$JOBS"

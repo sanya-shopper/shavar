@@ -1,6 +1,6 @@
 name = "shavar"
 version = "0.1.0"
-defaultTargets = ["Shavar", "shavar", "powdriver"]
+defaultTargets = ["Shavar", "shavar", "powdriver", "roundsdriver"]
 
 # `globs` makes every module under Shavar/ part of the library, including
 # Shavar/Tests.lean (build-time known-answer checks) and Shavar/Audit.lean
@@ -21,3 +21,10 @@ root = "Main"
 [[lean_exe]]
 name = "powdriver"
 root = "PowDriver"
+
+# The library-level round-count contract of SPEC.md 6.1 is likewise not
+# reachable through the CLI -- the CLI rejects an out-of-range count before the
+# library sees it -- so tests/rounds.sh needs its own entry point.
+[[lean_exe]]
+name = "roundsdriver"
+root = "RoundsDriver"

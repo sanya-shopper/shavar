@@ -1,0 +1,27 @@
+# The valid range of `rounds` at the LIBRARY boundary. SPEC.md §6.1 is
+# normative; this file is the machine-readable copy the drivers read.
+#
+# Every row is a library call hashing "abc" (24 bits) from the standard IV with
+# the given round count. Columns:
+#
+#   rounds    the count passed in
+#   expect    accepted | rejected            (| separates permitted verdicts)
+#   note
+#
+# `unrepresentable` is a permitted verdict only where the row says so: Lean's
+# round count is a `Nat`, which cannot hold a negative number at all, so the
+# negative row is not a test it can run. That is recorded as its own verdict
+# rather than counted as a rejection, because "the type forbids it" and "the
+# code checks for it" are different claims and only one of them transfers to
+# the other six implementations.
+#
+# rounds	expect	note
+0	accepted	legal: feed-forward only, no round runs
+1	accepted	the smallest count that runs a round
+4	accepted	the lookback depth; below this the window reaches into the seeds
+63	accepted	one short of full
+64	accepted	full SHA-256
+65	rejected	one past the end of K
+100	rejected	the value PROJECT_LOG records C silently clamping to 64
+1000	rejected	far out of range
+-1	rejected|unrepresentable	negative; Lean's Nat cannot express it

@@ -65,12 +65,21 @@ uint32_t shavar_sigma1(uint32_t x);
  * Compress one 64-byte block into h[0..7], recording everything into *tr
  * (which may be NULL if the trace is not wanted).
  *
- * `rounds` may be less than 64 to obtain a reduced-round variant, and `h`
- * may be any chaining value rather than shavar_iv. Neither is reachable
- * through a hashing API, and both are prerequisites for the free-start and
- * reduced-round analyses that this repository exists to support. */
-void shavar_compress(uint32_t h[8], const unsigned char block[64], int rounds,
-                     shavar_trace *tr);
+ * `rounds` must be in 0..64 inclusive: 0 is legal and means feed-forward
+ * only, 64 is SHA-256. Anything outside that range denotes no function at all
+ * and is REJECTED — the return is -1 and nothing is written. It is not
+ * clamped. Clamping would hand a caller who asked for 100 rounds a genuine
+ * SHA-256 digest together with a success status, which is the failure mode
+ * SPEC.md §6.1 exists to rule out.
+ *
+ * A reduced count, and an `h` that is any chaining value rather than
+ * shavar_iv, are both unreachable through a normal hashing API and both
+ * prerequisites for the free-start and reduced-round analyses that this
+ * repository exists to support.
+ *
+ * Returns 0 on success, -1 if `rounds` is out of range. */
+int shavar_compress(uint32_t h[8], const unsigned char block[64], int rounds,
+                    shavar_trace *tr);
 
 /* ---- hashing ------------------------------------------------------------
  *
@@ -84,7 +93,8 @@ void shavar_compress(uint32_t h[8], const unsigned char block[64], int rounds,
 int shavar_hash(const unsigned char *msg, uint64_t nbits,
                 unsigned char out[SHAVAR_DIGEST_BYTES]);
 
-/* As above, from a caller-chosen IV and round count. */
+/* As above, from a caller-chosen IV and round count. Returns -1 if `rounds`
+ * is outside 0..64, on the same reasoning as shavar_compress above. */
 int shavar_hash_ex(const unsigned char *msg, uint64_t nbits, const uint32_t iv[8],
                    int rounds, unsigned char out[SHAVAR_DIGEST_BYTES]);
 

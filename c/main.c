@@ -66,11 +66,17 @@ static int parse_u64(const char *s, uint64_t *out) {
 
 /* Parse the optional `rounds` argument. Returns 0 on success.
  *
- * The range 0..64 is enforced here rather than clamped in the library. An
- * earlier version used atoi() and let shavar_compress() clamp, which meant
- * `hash <msg> <n> 100` printed a perfectly good SHA-256 digest in answer to a
- * request that means nothing -- output that looks authoritative and is not.
- * Rejecting is the only honest response. See spec/CLI.md. */
+ * The range 0..64 is checked here so that the diagnostic can name the
+ * offending argument. It is ALSO enforced by the library -- shavar_compress
+ * returns -1 rather than clamping -- so a caller that links against
+ * libshavar instead of exec'ing this driver gets the same refusal.
+ *
+ * The two layers were not always in agreement. An earlier version used atoi()
+ * and let shavar_compress() clamp, which meant `hash <msg> <n> 100` printed a
+ * perfectly good SHA-256 digest in answer to a request that means nothing.
+ * That was fixed here, in the driver -- and the library went on clamping for
+ * every other caller until SPEC.md 6.1 was written and the check moved to
+ * where the bug actually lived. See spec/CLI.md and SPEC.md 6.1. */
 static int parse_rounds(const char *s, int *out) {
     uint64_t v;
     if (parse_u64(s, &v) != 0) return -1; /* also rejects "-1" and "12x" */
@@ -163,7 +169,10 @@ static int cmd_trace(const char *hex, const char *bits, const char *idxstr,
             fprintf(stderr, "shavar: nonzero trailing bits in final byte\n");
             return 2;
         }
-        shavar_compress(h, block, rounds, &tr);
+        if (shavar_compress(h, block, rounds, &tr) != 0) {
+            fprintf(stderr, "shavar: rounds must be 0..%d\n", SHAVAR_ROUNDS);
+            return 2;
+        }
     }
 
     for (t = 0; t < 8; t++) printf("HIN\t%d\t%08x\n", t, tr.h_in[t]);

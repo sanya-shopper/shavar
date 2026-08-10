@@ -169,4 +169,45 @@ def digestHex (H : Vector (BitVec 32) 8) : String :=
 def hashHex (msg : List (BitVec 8)) (L : Nat) (rounds : Nat := 64) : String :=
   digestHex (hashBytes msg L rounds)
 
+/-! ## The valid range of `rounds` (SPEC.md §6.1)
+
+`hashBytes` is a total function, so it has to do *something* when handed a
+round count above 64. What it does is take the first `rounds` entries of a
+64-element list via `roundInputs`, which silently yields all 64 — so asking
+for 100 rounds returns genuine SHA-256 with no indication of trouble. That is
+the failure mode SPEC.md §6.1 rules out.
+
+`hashBytes?` below is therefore the checked entry point, and it is the one the
+CLI and the test drivers use. `hashBytes` is kept unchecked because the proofs
+in `Equiv.lean` and `hashBytes_eq_std` quantify over all round counts and want
+a total function with no `Option` to thread through.
+
+A note on what is claimed: the clamping behaviour described above is **stated,
+not proved**. An attempt at `hashBytes msg L rounds = hashBytes msg L 64` for
+`64 ≤ rounds` is true and provable in principle, but every route tried through
+`List.take_of_length_le` on `List.finRange 64` sent elaboration into the
+sixty-four concrete index terms and did not terminate in a usable time. It was
+dropped rather than left half-finished or papered over with `native_decide`,
+which would have added a compiler-trust axiom to a file that has none. The
+range check itself is *tested*, in all eight builds, by `tests/rounds.sh`. The
+repository keeps the proved/tested line sharp and this is on the tested side.
+
+The same hazard existed in all seven implementations and was reachable in four
+different ways — C and Lean clamped, Perl and shell ran off the end of `K`,
+Scheme crashed. Only Python and JavaScript refused. See `tests/rounds.sh`. -/
+
+/-- The checked entry point: `none` when `rounds` is outside 0…64.
+
+Lean's `Nat` cannot be negative, so unlike the C, Perl and shell versions
+there is no lower bound to test — 0 is legal and means feed-forward only. -/
+def hashBytes? (msg : List (BitVec 8)) (L : Nat)
+    (rounds : Nat := 64) (H0 : Vector (BitVec 32) 8 := IV) :
+    Option (Vector (BitVec 32) 8) :=
+  if rounds > 64 then none else some (hashBytes msg L rounds H0)
+
+/-- `hashHex` with the same range check. -/
+def hashHex? (msg : List (BitVec 8)) (L : Nat) (rounds : Nat := 64) :
+    Option String :=
+  (hashBytes? msg L rounds).map digestHex
+
 end Shavar

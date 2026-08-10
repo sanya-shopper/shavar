@@ -12,6 +12,7 @@ is why the suite is split the way it is. `spec/SPEC.md` §8 names them:
 | V5 | the implementations agree with FIPS 180-4 | `nist.sh` — NIST CAVP known-answer vectors; and the external-oracle columns of `crosstest.sh` |
 | V6 | the implementations agree with **each other** | `crosstest.sh` — swept and random bit lengths, compared on digests *and* on per-round traces |
 | V7 | the proof-of-work comparison reads the digest in the right byte order | `pow.sh` — vectors anchored to the Bitcoin genesis block, run through all eight builds |
+| V8 | an out-of-range round count is rejected at the **library** boundary, not only at the CLI | `rounds.sh` — library-level drivers, one per language |
 
 Neither subsumes the other. Eight implementations could agree with each other
 and all be wrong (V5 catches that), or all match NIST on byte-aligned input and
@@ -166,6 +167,36 @@ that never looked.
 The Lean version is checked here too, and additionally *proves* the byte
 order: `lean/Shavar/Pow.lean` shows the byte-at-a-time walk agrees with the
 ordering of the two numbers those bytes denote, kernel-only, no `sorry`.
+
+### `rounds.sh` — the library round-count contract (V8)
+
+`rounds` may be 0…64. Outside that there is no such function, and `SPEC.md`
+§6.1 requires every implementation to *reject* rather than interpret. This
+phase calls each library directly with nine counts and checks the verdicts,
+then checks that the accepted counts produce the same digest everywhere.
+
+It exists for the same structural reason `pow.sh` does, and the reason is
+worth stating because it hid a real bug for the life of the repository so far.
+`spec/CLI.md` already fixed the range, and every implementation obeyed it *at
+the command line*. That constrained the library not at all, and nothing here
+could see the difference, because `crosstest.sh` drives everything through the
+CLI and the CLI rejects an out-of-range count before the library is reached.
+
+Underneath that blind spot the seven had diverged four ways on the same call:
+
+| | behaviour with `rounds = 100` |
+| --- | --- |
+| Python, JavaScript | rejected — correct |
+| C, Lean | silently clamped to 64, returning genuine SHA-256 with a success status |
+| Perl, shell | ran the loop past the end of `K`, returning a digest that is not any reduced-round variant of anything |
+| Scheme | crashed with an interpreter backtrace |
+
+The clamp is the worst of the four: a correct-looking answer to a request that
+means nothing. `PROJECT_LOG.md` records that being fixed once already — at the
+CLI layer, where it had been noticed rather than where it lived.
+
+The last phase puts the clamp back into a copy of `c/shavar.c` and requires
+the contract check to catch it; 4 of the 9 counts do.
 
 ### `crosstest.sh` — cross-implementation agreement (V6)
 
@@ -332,6 +363,9 @@ tests/
   pow.sh              proof-of-work comparison, all eight builds (V7)
   pow-vectors.tsv     the 18 shared vectors, SPEC.md §10.5
   pow-drivers/        one marshalling shim per language; they decide nothing
+  rounds.sh           the library round-count contract, all eight builds (V8)
+  rounds-vectors.tsv  the 9 counts under test, SPEC.md §6.1
+  rounds-drivers/     ditto
   fetch-vectors.sh    (re)download the NIST archives
   vectors/
     README.md         provenance, counts, and the .rsp format traps

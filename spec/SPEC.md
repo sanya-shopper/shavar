@@ -232,6 +232,38 @@ free-start (chosen-IV) attacks and reduced-round distinguishers are the bread
 and butter of hash cryptanalysis, and a library that only ever starts from the
 FIPS initial value cannot express them.
 
+### 6.1 The valid range of `rounds`, at the library boundary
+
+`rounds` is an integer in **0…64 inclusive**. 0 is legal and means
+feed-forward only; 64 is SHA-256. Anything outside that range is **not a
+request to be interpreted** — there is no such function — and every entry
+point that takes a round count must **reject** it and say so, at the library
+boundary and not only at the command line.
+
+Rejecting rather than accommodating matters more here than it looks, because
+each of the plausible accommodations is wrong in a way that is hard to notice:
+
+| What an implementation might do instead | Why it is worse than an error |
+| --- | --- |
+| clamp to 64 | returns a genuine SHA-256 digest, with a success status, to a caller who believes it asked for 100 rounds |
+| clamp to 0 | same, for a negative count |
+| run the loop anyway | indexes past the end of `K`, producing a digest that is not any reduced-round variant of anything |
+| crash | the caller learns something is wrong but not what, and a crash in a library is not a diagnosis |
+
+The first is the most dangerous: a correct-looking answer to a meaningless
+question. `PROJECT_LOG.md` records this being fixed once already, at the CLI
+layer, in exactly those terms — and the library went on doing it afterwards,
+because the fix was applied where the bug had been observed rather than where
+it lived, and nothing here said the library could not.
+
+The specification is explicit about this precisely because the CLI contract in
+`spec/CLI.md` §3 already fixed the range for command-line callers, and that
+turned out not to constrain the library at all. Seven implementations then
+disagreed four ways about the same call, undetected, because no test could
+reach it: `crosstest.sh` drives everything through the CLI, and the CLI
+rejects out-of-range counts before the library ever sees them. `tests/rounds.sh`
+is what closes that gap; §8 obligation V8 is the claim it discharges.
+
 Each implementation also offers the **proof-of-work comparison** of §10 —
 decode a compact `nBits` target and decide whether a digest meets it. This one
 is library-only: it has no CLI verb, so `tests/pow.sh` drives it through a
@@ -305,6 +337,7 @@ different kinds of evidence.
 | V5 | The implementations agree with FIPS 180-4 | NIST CAVP known-answer vectors, byte- and bit-oriented |
 | V6 | The implementations agree with **each other** | Cross-testing on digests *and* on per-round traces, over a swept corpus of bit lengths |
 | V7 | The PoW comparison (§10) reads the digest in the right byte order | Vectors anchored to the Bitcoin genesis block, run through every implementation by `tests/pow.sh`; the Lean version additionally proves the byte-wise loop equals the 256-bit integer comparison |
+| V8 | Every implementation rejects an out-of-range round count at the **library** boundary, not only at the CLI (§6.1) | `tests/rounds.sh` — library-level drivers, one per language |
 
 V5 and V6 answer different questions. V5 catches a shared misreading of the
 standard; V6 catches a transcription slip in one language, and because it

@@ -244,6 +244,16 @@ sub pad_message {
 sub compress {
     my ($h, $block, $rounds, $tr) = @_;
 
+    # SPEC.md 6.1. Outside 0..64 there is no such function, so this is an
+    # error and not a request to be interpreted. Perl would otherwise run the
+    # loop past the end of @K, where every constant reads as undef: the result
+    # was a digest that is not any reduced-round variant of anything, produced
+    # with no indication of trouble beyond a burst of uninitialized-value
+    # warnings on stderr. The CLI checked this in want_rounds(); nothing
+    # checked it for a caller who require'd this file as a library.
+    die "rounds must be 0..$ROUNDS_MAX, got $rounds\n"
+        if !defined $rounds || $rounds < 0 || $rounds > $ROUNDS_MAX;
+
     # --- message schedule, SPEC.md §4 -------------------------------------
     # unpack('N16', $s) splits the string into sixteen values, each read as a
     # 32-bit unsigned big-endian integer ('N' is mnemonic for network order,

@@ -275,6 +275,11 @@ jobs:
         # that mutual agreement (V7) is actually checked rather than just the
         # expected verdicts.
         run: bash tests/pow.sh --impls "c lean"
+      - name: Library round-count contract, Lean against C
+        # Same reasoning for SPEC.md §6.1 / V8. Lean silently clamped an
+        # out-of-range count until that section was written, so this is the
+        # regression test for the Lean half of that fix.
+        run: bash tests/rounds.sh --impls "c lean"
 
   # ------------------------------------------------------------------ PDF
   paper:

@@ -6,6 +6,87 @@ preserved alongside the history of code.
 
 ---
 
+## 2026-08-10 — The round-count clamp: a fix applied where the bug was noticed
+
+`SPEC.md` §6.1 now states that `rounds` is 0…64 at the **library** boundary and
+that anything outside it must be rejected. All seven implementations were
+changed to obey, and `tests/rounds.sh` checks that they do.
+
+**How it was found.** Not by a test — nothing in the repository could reach it.
+It came out of measuring line and branch coverage for the first time, which had
+never been done here. `c/shavar.c` was at 90.48% branch coverage, and two of the
+four uncovered branches were the round-count clamp. They were uncovered
+*because* the CLI had been taught to reject out-of-range counts, so nothing
+driving the program through its command line could ever reach them. Dead from
+the CLI, live from the library: the coverage gap was the earlier fix's own
+shadow.
+
+**What the bug was.** `shavar_compress` clamped silently, and `shavar_hash_ex`
+passed `rounds` straight through. A caller linking against `libshavar` and
+asking for 100 rounds got a genuine SHA-256 digest and a success status, in
+answer to a request that denotes no function. This is the same defect
+`d845127` fixed at the CLI layer, described in the entry below in exactly those
+terms — "a confidently wrong answer beats an error message only in the sense
+that it is harder to notice". The fix went where the bug had been *observed*
+rather than where it *lived*, and every other path to it stayed open.
+
+**Probing the other six turned up worse, and four-way disagreement.** With
+`rounds = 100` at the library boundary:
+
+| | behaviour |
+| --- | --- |
+| Python, JavaScript | rejected — correct, and they always had been |
+| C, Lean | silently clamped to 64, returning real SHA-256 |
+| Perl, shell | ran the loop past the end of `K` — every missing constant reading as `undef` or the empty string, so both produced the *same* garbage digest `6723435a…` and Perl additionally sprayed uninitialized-value warnings |
+| Scheme | crashed with an interpreter backtrace |
+
+Seven implementations, four behaviours, none of it visible to `crosstest.sh`
+because that harness drives everything through the CLI and the CLI rejects the
+input before the library sees it. That Perl and shell agreed *with each other*
+on the garbage is the nastiest part: two columns matching looks like evidence.
+
+**A methodological note on the probe itself.** The first survey script produced
+wrong digests for Perl and shell even at `rounds = 64`, because it failed to
+hand them an initial chaining value — Perl's `@IV` is a file-scoped `my`, and
+the shell needs `shavar__init`. Those rows were artifacts of the harness, not
+findings about the implementations, and were nearly reported as findings. The
+fix was to make the probe assert the known SHA-256("abc") digest at
+`rounds = 64` before any out-of-range row is believed. A measurement that
+cannot demonstrate it is measuring correctly is not evidence.
+
+**What changed.** `shavar_compress` now returns `int` rather than `void` — it
+had no way to refuse otherwise — and `shavar_hash_ex` propagates. That is an
+API break, taken deliberately: the alternative was a library that cannot say
+no. Perl and Scheme raise, the shell returns 1, and Lean gained `hashBytes?`
+and `hashHex?` as checked entry points, `Nat` having no negative case to test.
+
+**One thing not delivered.** `hashBytes_clamps` — a Lean theorem stating that
+above 64 the total function silently behaves as 64 — is true and provable in
+principle but was dropped. Every route tried through `List.take_of_length_le`
+on `List.finRange 64` sent elaboration into sixty-four concrete index terms and
+did not terminate in usable time; the file builds in 4 seconds without it and
+hung past 10 minutes with it. It was removed rather than left half-proved or
+forced through with `native_decide`, which would have put a compiler-trust
+axiom into a file that has none. The Lean doc comment says so explicitly. The
+range check is on the *tested* side of the proved/tested line, in all eight
+builds.
+
+### Findings
+
+- **A check enforced at one layer is not a property of the system.** The CLI
+  fix was correct and complete for the CLI. It was mistaken for a fix to the
+  program. The general shape — "we validate that at the boundary" — is worth
+  distrusting whenever there is more than one boundary.
+- **Coverage measurement was worth doing and had never been done.** No
+  instrumentation existed anywhere in the repo; every use of the word
+  "coverage" in the codebase meant input-space coverage. The first run found a
+  real bug, and it found it in the branches that were uncovered *for a reason*.
+- **`tests/rounds.sh` puts the clamp back** into a copy of `c/shavar.c` and
+  requires the contract check to catch it. 4 of the 9 counts do. Same
+  discipline as `selfcheck.sh` and the mutation phase of `pow.sh`.
+
+---
+
 ## 2026-08-09 — Proof-of-work comparison, in all seven languages
 
 `SPEC.md` §10 specifies a proof-of-work (PoW) comparison — decode a compact

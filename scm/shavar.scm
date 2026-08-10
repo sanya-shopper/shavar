@@ -512,6 +512,15 @@
 ;;; are the primitive on which everything else in this file is built rather
 ;;; than an extra bolted on beside it.
 (define (compress h block rounds)
+  ;; SPEC.md 6.1.  Outside 0..64 there is no such function, so this is an
+  ;; error rather than a request to be interpreted.  Without the check the
+  ;; round loop indexes past the end of the K vector and the whole program
+  ;; dies with an implementation backtrace -- which tells the caller that
+  ;; something is wrong but not what, and a crash inside a library is not a
+  ;; diagnosis.  The CLI checked the range in `parse-rounds`; nothing checked
+  ;; it for a caller that loaded this file as a library.
+  (if (or (not (integer? rounds)) (< rounds 0) (> rounds 64))
+      (shavar-error "rounds must be 0..64" rounds))
   (let ((w  (message-schedule block))
         (a  (make-vector 68 0))
         (e  (make-vector 68 0))

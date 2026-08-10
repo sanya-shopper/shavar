@@ -117,8 +117,8 @@ uint32_t shavar_sigma1(uint32_t x) { return rotr(x, 17) ^ rotr(x, 19) ^ shr(x, 1
 /* Compression (SPEC.md §3, §4)                                        */
 /* ------------------------------------------------------------------ */
 
-void shavar_compress(uint32_t h[8], const unsigned char block[64], int rounds,
-                     shavar_trace *tr) {
+int shavar_compress(uint32_t h[8], const unsigned char block[64], int rounds,
+                    shavar_trace *tr) {
     /* Local trace. If the caller did not want one we still build it, because
      * the 2D form needs the A and E histories anyway — the "trace" and the
      * "state" are the same object in this formulation. That is a real
@@ -130,8 +130,13 @@ void shavar_compress(uint32_t h[8], const unsigned char block[64], int rounds,
 
     int t;
 
-    if (rounds < 0) rounds = 0;
-    if (rounds > SHAVAR_ROUNDS) rounds = SHAVAR_ROUNDS;
+    /* SPEC.md §6.1. This used to clamp — `if (rounds > 64) rounds = 64;` —
+     * which meant a caller asking for 100 rounds got a genuine SHA-256 digest
+     * and a success status in answer to a request that denotes no function at
+     * all. The CLI was taught to reject out-of-range counts; the library was
+     * not, so the confidently-wrong answer stayed reachable by every caller
+     * who linked against it rather than exec'ing it. */
+    if (rounds < 0 || rounds > SHAVAR_ROUNDS) return -1;
     s->rounds = rounds;
 
     for (t = 0; t < 8; t++) s->h_in[t] = h[t];
@@ -209,6 +214,7 @@ void shavar_compress(uint32_t h[8], const unsigned char block[64], int rounds,
     }
 
     for (t = 0; t < 8; t++) s->h_out[t] = h[t];
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -290,7 +296,7 @@ int shavar_hash_ex(const unsigned char *msg, uint64_t nbits, const uint32_t iv[8
 
     for (i = 0; i < nblocks; i++) {
         if (shavar_padded_block(msg, nbits, i, block) != 0) return -1;
-        shavar_compress(h, block, rounds, NULL);
+        if (shavar_compress(h, block, rounds, NULL) != 0) return -1;
     }
 
     /* Serialise big-endian, again by explicit shifts. */

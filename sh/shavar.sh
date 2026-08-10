@@ -310,9 +310,20 @@ shavar_sigma1() { R=$(( ((($1 >> 17) | ($1 << 15)) ^ (($1 >> 19) | ($1 << 13)) ^
 # use rather than hidden behind an accessor function, because an accessor would
 # be a function call in the innermost loop. Read `SHAVAR_A[t+3]` as `A[t-1]`.
 # ---------------------------------------------------------------------------
+# SPEC.md 6.1: `rounds` must be 0..64. Outside that range there is no such
+# function, so this returns 1 rather than inventing an interpretation. Without
+# the check the round loop runs past the end of SHAVAR_K, where every missing
+# constant expands to the empty string and arithmetic reads it as 0: the result
+# was a digest that is not any reduced-round variant of anything, produced in
+# silence. shavar_main checked the range; nothing checked it for a caller that
+# sourced this file with SHAVAR_LIB=1.
 shavar_compress() {
   [ -n "${ZSH_VERSION:-}" ] && emulate -L ksh
   local rounds=$1
+  case "$rounds" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  (( rounds <= 64 )) || return 1
   local t i j x y a1 a2 a3 a4 e1 e2 e3 e4 t1 t2
   local M=0xFFFFFFFF
 
@@ -486,7 +497,7 @@ shavar_hash_ex() {
   SHAVAR_H=("${SHAVAR_IV_IN[@]}")
   for ((b = 0; b < SHAVAR_NBLOCKS; b++)); do
     shavar_block "$L" "$b"
-    shavar_compress "$rounds"
+    shavar_compress "$rounds" || return 1
   done
 }
 
@@ -881,7 +892,8 @@ shavar_main() {
       SHAVAR_H=("${SHAVAR_IV_IN[@]}")
       for ((b = 0; b <= blockidx; b++)); do
         shavar_block "$2" "$b"
-        shavar_compress "$rounds"
+        shavar_compress "$rounds" || {
+          printf 'shavar: rounds must be 0..64\n' >&2; return 2; }
       done
       shavar_print_trace "$rounds"
       return 0

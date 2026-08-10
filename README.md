@@ -61,6 +61,7 @@ to the `E` track.
 | `js/index.html` | interactive step-debugger, runs from `file://` in Safari |
 | `tests/` | cross-testing harness + 1154 NIST CAVP vectors |
 | `research/` | differential propagation tooling |
+| `broken/` | **SHA-0 and SHA-1**, and a working collision attack: the earlier, broken SHAs |
 | `doc/shavar.pdf` | comparative write-up: what each language makes hard |
 | `cweb/shavar-cweb.pdf` | the C implementation typeset as prose, with cross-references and an index |
 
@@ -126,6 +127,8 @@ instrument and a weak oracle, and the tooling says so on every run.
 
 ## Reading order
 
+0. `broken/sha-broken.pdf` — if you came for "which SHA was broken?": both
+   of the earlier ones, and they differ by a single rotation
 1. `spec/SPEC.md` — the mathematics, and why this formulation
 2. `doc/shavar.pdf` — the comparison, and the surprises
 3. `c/shavar.c` — the shortest and most direct implementation, or

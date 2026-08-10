@@ -1,0 +1,155 @@
+% Bibliography for broken/sha-broken.tex.
+%
+% Per the project convention, every entry records whether a local copy exists
+% in refs/ and, if so, its path and retrieval date. Entries without a local
+% copy say so explicitly rather than leaving the reader to find out.
+%
+% Nothing here was cited without opening it first. The retrieved PDFs were
+% checked against their own title pages before being used; the project log
+% records an earlier occasion on which a guessed download turned out to be an
+% unrelated paper, which is why that step is written down.
+%
+% Note on malware screening: the project convention asks for a VirusTotal
+% check on retrieved files. No API access was available in this environment,
+% so what was actually done is stated plainly instead: each file was confirmed
+% to be a well-formed PDF by MIME type, its first page was extracted as text
+% and matched against the expected title and authors, and it was retrieved
+% over TLS from the publisher, the authors' own site, or the Internet Archive.
+% That is weaker than a scan and is recorded as such.
+
+@inproceedings{chabaud1998,
+  author    = {Chabaud, Florent and Joux, Antoine},
+  title     = {Differential Collisions in {SHA-0}},
+  booktitle = {Advances in Cryptology --- CRYPTO '98},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {1462},
+  pages     = {56--71},
+  publisher = {Springer},
+  year      = {1998},
+  doi       = {10.1007/BFb0055720},
+  note      = {Local copy: \path{refs/chabaud-joux-1998.pdf}, retrieved
+               2026-08-10 via the Internet Archive's copy of the publisher
+               PDF. Identity confirmed from the title page. This is the paper
+               that introduced local collisions and disturbance vectors, and
+               its abstract already records that the same method fails against
+               SHA-1 --- the earliest statement of the point this directory
+               demonstrates by measurement.},
+}
+
+@techreport{fips180,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Secure Hash Standard},
+  number      = {FIPS PUB 180},
+  institution = {U.S. Department of Commerce},
+  year        = {1993},
+  month       = {5},
+  note        = {The original SHA, retrospectively called SHA-0. Withdrawn in
+                 1995. \textbf{No local copy}: NIST does not serve the
+                 withdrawn 1993 publication, and no authoritative PDF was
+                 located. The algorithm as implemented here is FIPS 180-1
+                 with the expansion rotation removed, which is the documented
+                 relationship between the two.},
+}
+
+@techreport{fips180-1,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Secure Hash Standard},
+  number      = {FIPS PUB 180-1},
+  institution = {U.S. Department of Commerce},
+  year        = {1995},
+  month       = {4},
+  url         = {https://csrc.nist.gov/pubs/fips/180-1/final},
+  note        = {SHA-1: FIPS 180 plus a one-bit rotation in the message
+                 expansion. \textbf{No local copy}: the archived PDF returned
+                 404 from every NIST path tried on 2026-08-10. The superseding
+                 FIPS 180-4 \cite{fips180-4} is mirrored in \path{refs/} and
+                 specifies SHA-1 identically.},
+}
+
+@techreport{fips180-4,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Secure Hash Standard (SHS)},
+  number      = {FIPS PUB 180-4},
+  institution = {U.S. Department of Commerce},
+  year        = {2015},
+  doi         = {10.6028/NIST.FIPS.180-4},
+  note        = {Local copy: \path{refs/fips180-4.pdf}, retrieved 2026-08-09.
+                 Carries the current normative text of SHA-1 as well as the
+                 SHA-2 family.},
+}
+
+@inproceedings{joux2004,
+  author    = {Biham, Eli and Chabaud, Florent and Joux, Antoine},
+  title     = {Collisions of {SHA-0}},
+  booktitle = {Announcement at CRYPTO 2004 rump session},
+  year      = {2004},
+  note      = {The first actual SHA-0 collision, found by Joux with
+               Carribault, Lemuet and Jalby on a 256-CPU machine.
+               \textbf{No local copy}: a rump-session announcement, never
+               published as a paper with a stable PDF. Cited for the historical
+               fact and the cost figure only, both of which are corroborated
+               by \cite{wang2005sha0}.},
+}
+
+@inproceedings{wang2005sha0,
+  author    = {Wang, Xiaoyun and Yu, Hongbo and Yin, Yiqun Lisa},
+  title     = {Efficient Collision Search Attacks on {SHA-0}},
+  booktitle = {Advances in Cryptology --- CRYPTO 2005},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {3621},
+  pages     = {1--16},
+  publisher = {Springer},
+  year      = {2005},
+  doi       = {10.1007/11535218_1},
+  note      = {\textbf{No local copy}: publisher PDF is paywalled and no
+               author-hosted copy was reachable on 2026-08-10. Cited for the
+               reduction of SHA-0 collision cost to roughly $2^{39}$.},
+}
+
+@inproceedings{wang2005sha1,
+  author    = {Wang, Xiaoyun and Yin, Yiqun Lisa and Yu, Hongbo},
+  title     = {Finding Collisions in the Full {SHA-1}},
+  booktitle = {Advances in Cryptology --- CRYPTO 2005},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {3621},
+  pages     = {17--36},
+  publisher = {Springer},
+  year      = {2005},
+  doi       = {10.1007/11535218_2},
+  note      = {\textbf{No local copy}: paywalled, as above. The first attack
+               on full SHA-1 below the birthday bound, at about $2^{69}$.},
+}
+
+@inproceedings{stevens2017,
+  author    = {Stevens, Marc and Bursztein, Elie and Karpman, Pierre and
+               Albertini, Ange and Markov, Yarik},
+  title     = {The First Collision for Full {SHA-1}},
+  booktitle = {Advances in Cryptology --- CRYPTO 2017},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {10401},
+  pages     = {570--596},
+  publisher = {Springer},
+  year      = {2017},
+  doi       = {10.1007/978-3-319-63697-9_19},
+  url       = {https://shattered.io/static/shattered.pdf},
+  note      = {Local copy: \path{refs/shattered-2017.pdf}, retrieved
+               2026-08-10 from \url{shattered.io}. Identity confirmed from the
+               title page. The SHAttered collision: two PDFs with the same
+               SHA-1, at a cost of roughly $2^{63.1}$ compressions.},
+}
+
+@inproceedings{leurent2020,
+  author    = {Leurent, Ga{\"e}tan and Peyrin, Thomas},
+  title     = {{SHA-1} is a Shambles: First Chosen-Prefix Collision on
+               {SHA-1} and Application to the {PGP} Web of Trust},
+  booktitle = {29th USENIX Security Symposium},
+  pages     = {1839--1856},
+  year      = {2020},
+  url       = {https://eprint.iacr.org/2020/014},
+  note      = {\textbf{No local copy}: the IACR ePrint server returned 403 to
+               every automated request made on 2026-08-10, and the project
+               site hosts no PDF at a guessable path. The chosen-prefix
+               collision, at about $2^{63.4}$ and roughly \$45{,}000 of rented
+               GPU time --- the result that made SHA-1 forgery practical
+               rather than merely demonstrable.},
+}

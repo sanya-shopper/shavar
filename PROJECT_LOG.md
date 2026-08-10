@@ -6,6 +6,79 @@ preserved alongside the history of code.
 
 ---
 
+## 2026-08-10 — broken/: SHA-0, SHA-1, and a collision attack that runs
+
+Asked which of the earlier SHAs was "fully broken". The answer is both, and
+the interesting part is that they are the same function: SHA-1 rotates the
+message-expansion feedback left by one bit and SHA-0 does not. NIST withdrew
+SHA-0 in 1995 without explaining why. That rotation is why.
+
+`broken/` implements both in C and Lean, implements the attack, and carries a
+seven-page write-up, `sha-broken.pdf`.
+
+**The rotation is worth measuring, and it measures enormous.** Feed a one-bit
+difference through both expansions: under SHA-0 it stays in the single bit
+column it started in (31 difference bits, 1 column) and under SHA-1 it spreads
+over 23 columns (109 bits). That is the whole attack surface in one table.
+
+**Lean proves what the C exhibits.** `sha0_expand_mask` says SHA-0's expansion
+commutes with masking — for every message, mask and round — which is exactly
+"it never moves information between bit positions".
+`sha1_expand_not_mask` refutes the same statement for SHA-1 by explicit
+counterexample. Kernel-only: `[propext, Quot.sound]`, no `Classical.choice`.
+The distributivity lemma underneath is proved by eight-case truth table rather
+than `bv_decide`, deliberately: bit-blasting to SAT would put the Lean
+compiler in the trusted base for a fact a truth table settles.
+
+**Real collisions, found, not quoted.** `collide search --rounds 25` produces
+two distinct 64-byte messages with the same 25-round SHA-0 digest in about ten
+milliseconds, re-verified through the CLI rather than trusted from the search.
+Both are one block, so they pad identically and it is a hash collision, not
+merely a compression-function one.
+
+### Findings
+
+- **The Parity rounds are not free, and I had written that they were.** The
+  comment in `collide.c` said a linear `f` means "no condition"; the
+  measurement it sat next to said 2^-3. Eight times cheaper than `Ch`/`Maj`,
+  not free — the residual is carries, because the round adds mod 2^32 while
+  the differential is stated in XOR. The measurement corrected the code's own
+  documentation, which is the argument for measuring rather than asserting.
+- **A disturbance vector is only usable if its five time-shifts are also
+  codewords.** Fifteen extra linear conditions, cutting 65535 candidates to
+  2047. Omitting it made every differential unmountable, and the first version
+  of the search reported exactly that — `valid expansion: NO` for every round
+  count. The bug announced itself correctly; what took the time was believing
+  it rather than assuming the search was at fault.
+- **A probe that cannot show it is working is not evidence.** The first survey
+  of library-level behaviour across languages returned wrong digests for Perl
+  and shell even in the control case, because it never handed them an initial
+  chaining value. Those rows were nearly reported as findings about the
+  implementations. Probes now assert the known answer in the control condition
+  before any experimental row is believed.
+- **Two of five references downloaded.** Chabaud–Joux 1998 came via the
+  Internet Archive and SHAttered from `shattered.io`; both were confirmed
+  against their own title pages before being cited, following the earlier
+  incident recorded below where a guessed download turned out to be an
+  unrelated paper. The IACR ePrint server returned 403 to every automated
+  request and NIST no longer serves the withdrawn FIPS 180-1 PDF, so those
+  entries say "no local copy" outright. No VirusTotal access was available;
+  `refs.bib` states what was actually done instead of implying a scan.
+- **SHA-0 has no oracle.** SHA-1 is checkable against three independent
+  implementations on any machine; SHA-0 is implemented by nothing current.
+  It therefore rests on published vectors plus the structural check that
+  switching the rotation on turns each SHA-0 answer into the oracle-verified
+  SHA-1 one, and on C and Lean — written separately — agreeing.
+
+### Not delivered
+
+Full SHA-0 (~2^39) and SHA-1 (~2^63) collisions are out of reach on one
+machine and nothing claims otherwise. Message modification is not implemented,
+which is why the search stops around 25 rounds. `sha-broken.pdf` §7 lists both
+rather than leaving the reader to infer the boundary.
+
+---
+
 ## 2026-08-10 — The round-count clamp: a fix applied where the bug was noticed
 
 `SPEC.md` §6.1 now states that `rounds` is 0…64 at the **library** boundary and

@@ -1,0 +1,13 @@
+name = "sha01"
+version = "0.1.0"
+defaultTargets = ["Sha01", "sha01lean"]
+
+[[lean_lib]]
+name = "Sha01"
+globs = ["Sha01", "Sha01.+"]
+
+# A driver so broken/tests/run.sh can check the Lean implementation against the
+# C one. The two were written from FIPS 180 independently; agreeing is evidence.
+[[lean_exe]]
+name = "sha01lean"
+root = "Main"

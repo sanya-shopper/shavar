@@ -56,6 +56,24 @@ else
   ok "rounds out of range rejected"
 fi
 
+# --- the Lean implementation, written independently, must agree ------------
+LEANBIN=$BROKEN/lean/.lake/build/bin/sha01lean
+if [ -x "$LEANBIN" ]; then
+  lfail=0
+  for n in 0 1 3 55 56 63 64 65 119 200; do
+    hex=$(python3 -c "import os,sys; sys.stdout.write(os.urandom($n).hex())" 2>/dev/null) || continue
+    arg=$hex; [ -z "$hex" ] && arg=-
+    for v in sha0 sha1; do
+      a=$("$SHA01" hash $v "$arg")
+      b=$("$LEANBIN" hash $v "$arg")
+      [ "$a" = "$b" ] || { bad "C and Lean disagree ($v, len=$n)"; lfail=1; }
+    done
+  done
+  [ "$lfail" = 0 ] && ok "C and Lean agree at 10 lengths x 2 variants"
+else
+  say "  --   lean driver not built (lake build in broken/lean), skipped"
+fi
+
 # --- the attack ------------------------------------------------------------
 say ""
 say "== the attack =="

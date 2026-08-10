@@ -49,6 +49,7 @@ cweb/shavar-cweb.lbl
 cweb/shavar-cweb.pgf
 
 # broken/ build outputs
+broken/lean/.lake/
 broken/c/sha01
 broken/attack/expansion
 broken/attack/collide

@@ -100,6 +100,10 @@ runpart pow       sh "$TESTS_DIR/pow.sh"
 # V8. Also library-only, and for the same reason invisible to crosstest.sh:
 # the CLI rejects an out-of-range round count before the library sees it.
 runpart rounds    sh "$TESTS_DIR/rounds.sh"
+# The Lean-only `sha256sum` file-hashing binary, which sits outside the shared
+# CLI contract and so is invisible to contract.sh and crosstest.sh. Known
+# answers and I/O behaviour; skips itself if the Lean build is absent.
+runpart shasum    sh "$TESTS_DIR/shasum.sh"
 
 if [ "$DO_NIST" = 1 ]; then
   runpart nist sh "$TESTS_DIR/nist.sh" --mode "$MODE" --keep --jobs "$JOBS"

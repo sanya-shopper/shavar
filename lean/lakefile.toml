@@ -1,6 +1,6 @@
 name = "shavar"
 version = "0.1.0"
-defaultTargets = ["Shavar", "shavar", "powdriver", "roundsdriver"]
+defaultTargets = ["Shavar", "shavar", "powdriver", "roundsdriver", "sha256sum"]
 
 # `globs` makes every module under Shavar/ part of the library, including
 # Shavar/Tests.lean (build-time known-answer checks) and Shavar/Audit.lean
@@ -28,3 +28,9 @@ root = "PowDriver"
 [[lean_exe]]
 name = "roundsdriver"
 root = "RoundsDriver"
+
+# A shasum-style convenience for hashing local files. Lean-only, outside the
+# shared CLI contract of spec/CLI.md — see the header of Sha256Sum.lean.
+[[lean_exe]]
+name = "sha256sum"
+root = "Sha256Sum"

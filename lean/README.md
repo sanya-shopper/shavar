@@ -15,6 +15,7 @@ cd lean
 lake build                     # compiles the library, the proofs, and the tests
 .lake/build/bin/shavar hash - 0
 .lake/build/bin/shavar selftest
+.lake/build/bin/sha256sum lakefile.toml   # shasum-style file hashing
 ```
 
 Requires Lean 4.32.2 (pinned in `lean-toolchain`; `elan` will fetch it). There
@@ -46,6 +47,7 @@ library and `Std`, which ship with the toolchain.
 | `Shavar/Tests.lean` | Checks that run during `lake build` |
 | `Shavar/Audit.lean` | `#print axioms` for every headline theorem |
 | `Main.lean` | The `shavar` executable |
+| `Sha256Sum.lean` | The `sha256sum` executable — hash local files or stdin, shasum-style |
 
 ## The three ideas a non-Lean reader needs
 

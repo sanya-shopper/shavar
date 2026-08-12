@@ -540,3 +540,7 @@ so far. The next entry should be a "Project defined" one, stating the goal, the
 constraints, and what a finished version looks like — written before code, so
 that later entries can be read against the original intent rather than against
 a reconstruction of it.
+
+2026-08-12: reference PDFs relocated to the sibling `../refs/shavar/`
+tree (local use only, per the updated projects-wide B-rules); bib
+paths updated and refs/ purged from git history.

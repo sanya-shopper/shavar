@@ -2,22 +2,29 @@
 #
 # Nothing here is for production use. Both functions are cryptographically
 # dead; this directory exists to show how.
+# Build output goes to the disposable tree (CLAUDE.md T2/T4).
+BUILD_TARGET_PREFIX ?= /Users/thv/Claude/Projects
+OUT      = $(BUILD_TARGET_PREFIX)/_buildoutput/256-shavar/broken
+
 CC      ?= cc
 CFLAGS  ?= -std=c99 -O2 -Wall -Wextra -pedantic-errors -Wshadow -Wconversion \
            -Wsign-conversion -Wstrict-prototypes -Wmissing-prototypes -Werror
 IFLAGS   = -Ic
 
-BINS = c/sha01 attack/expansion attack/collide
+BINS = $(OUT)/sha01 $(OUT)/expansion $(OUT)/collide
 
 all: $(BINS)
 
-c/sha01: c/sha01.c c/main.c c/sha01.h
+$(OUT)/sha01: c/sha01.c c/main.c c/sha01.h
+	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) $(IFLAGS) -o $@ c/sha01.c c/main.c
 
-attack/expansion: attack/expansion.c c/sha01.c c/sha01.h
+$(OUT)/expansion: attack/expansion.c c/sha01.c c/sha01.h
+	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) $(IFLAGS) -o $@ attack/expansion.c c/sha01.c
 
-attack/collide: attack/collide.c c/sha01.c c/sha01.h
+$(OUT)/collide: attack/collide.c c/sha01.c c/sha01.h
+	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) $(IFLAGS) -o $@ attack/collide.c c/sha01.c
 
 check: all

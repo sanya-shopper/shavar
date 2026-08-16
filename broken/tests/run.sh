@@ -17,7 +17,9 @@
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 BROKEN=$(dirname "$HERE")
-SHA01=$BROKEN/c/sha01
+# Binaries live in the disposable build tree (CLAUDE.md T2/T4).
+OUT=${BUILD_TARGET_PREFIX:-/Users/thv/Claude/Projects}/_buildoutput/256-shavar/broken
+SHA01=$OUT/sha01
 FAILURES=0
 
 say()  { printf '%s\n' "$*"; }
@@ -57,7 +59,7 @@ else
 fi
 
 # --- the Lean implementation, written independently, must agree ------------
-LEANBIN=$BROKEN/lean/.lake/build/bin/sha01lean
+LEANBIN=${BUILD_TARGET_PREFIX:-/Users/thv/Claude/Projects}/_buildoutput/256-shavar/broken/lean/bin/sha01lean
 if [ -x "$LEANBIN" ]; then
   lfail=0
   for n in 0 1 3 55 56 63 64 65 119 200; do
@@ -77,12 +79,12 @@ fi
 # --- the attack ------------------------------------------------------------
 say ""
 say "== the attack =="
-[ -x "$BROKEN/attack/expansion" ] && [ -x "$BROKEN/attack/collide" ] || {
+[ -x "$OUT/expansion" ] && [ -x "$OUT/collide" ] || {
   say "build first: make -C $BROKEN"; exit 1; }
 
 # The structural claim the whole break rests on: a one-bit difference stays in
 # one column under SHA-0 and does not under SHA-1.
-sp=$("$BROKEN/attack/expansion" spread)
+sp=$("$OUT/expansion" spread)
 # Anchor on the summary lines, not on the bare variant name: the table header
 # mentions both variants, so a looser match reads the SHA-0 row twice.
 cols0=$(printf '%s\n' "$sp" | awk '/SHA-0 total difference/{f=1} f&&/distinct bit positions/{print $6; exit}')
@@ -94,7 +96,7 @@ cols1=$(printf '%s\n' "$sp" | awk '/SHA-1 total difference/{f=1} f&&/distinct bi
 
 # A real collision, found now, not quoted from a paper.
 for R in 20 25; do
-  out=$("$BROKEN/attack/collide" search --rounds $R --seconds 30 2>&1)
+  out=$("$OUT/collide" search --rounds $R --seconds 30 2>&1)
   m1=$(printf '%s\n' "$out" | awk '/m1     =/{print $3}')
   m2=$(printf '%s\n' "$out" | awk '/m2     =/{print $3}')
   if [ -n "$m1" ] && [ -n "$m2" ] && [ "$m1" != "$m2" ]; then

@@ -1,4 +1,9 @@
 name = "shavar"
+
+# Build output goes to the disposable tree at Projects/buildoutput/,
+# which is safe to delete wholesale; Lake recreates it on the next build.
+# Static path, not $VAR: lakefile.toml does not interpolate the environment.
+buildDir = "../../buildoutput/256-shavar/lean"
 version = "0.1.0"
 defaultTargets = ["Shavar", "shavar", "powdriver", "roundsdriver", "sha256sum"]
 

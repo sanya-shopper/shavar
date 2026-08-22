@@ -2,8 +2,11 @@
 #
 # Nothing here is for production use. Both functions are cryptographically
 # dead; this directory exists to show how.
-# Build output goes to the disposable tree (CLAUDE.md T2/T4).
-BUILD_TARGET_PREFIX ?= /Users/thv/Claude/Projects
+# Build output goes to the disposable tree (CLAUDE.md T2/T4). The default
+# prefix is the directory the repo sits in — derived, not hardcoded, so the
+# same Makefile works on a CI checkout — matching where the relative buildDir
+# in lean/lakefile.toml puts the Lean half.
+BUILD_TARGET_PREFIX ?= $(abspath ../..)
 OUT      = $(BUILD_TARGET_PREFIX)/_buildoutput/256-shavar/broken
 
 CC      ?= cc

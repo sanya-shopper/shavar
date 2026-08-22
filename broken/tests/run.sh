@@ -17,8 +17,10 @@
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 BROKEN=$(dirname "$HERE")
-# Binaries live in the disposable build tree (CLAUDE.md T2/T4).
-OUT=${BUILD_TARGET_PREFIX:-/Users/thv/Claude/Projects}/_buildoutput/256-shavar/broken
+# Binaries live in the disposable build tree (CLAUDE.md T2/T4). The default
+# prefix is the directory the repo sits in, derived so a CI checkout works.
+DEFAULT_PREFIX=$(cd "$BROKEN/../.." && pwd)
+OUT=${BUILD_TARGET_PREFIX:-$DEFAULT_PREFIX}/_buildoutput/256-shavar/broken
 SHA01=$OUT/sha01
 FAILURES=0
 
@@ -59,7 +61,7 @@ else
 fi
 
 # --- the Lean implementation, written independently, must agree ------------
-LEANBIN=${BUILD_TARGET_PREFIX:-/Users/thv/Claude/Projects}/_buildoutput/256-shavar/broken/lean/bin/sha01lean
+LEANBIN=${BUILD_TARGET_PREFIX:-$DEFAULT_PREFIX}/_buildoutput/256-shavar/broken/lean/bin/sha01lean
 if [ -x "$LEANBIN" ]; then
   lfail=0
   for n in 0 1 3 55 56 63 64 65 119 200; do

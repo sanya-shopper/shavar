@@ -7,6 +7,13 @@
  * The CWEB version in cweb/ is not run separately here: cweb/test_cweb.sh
  * already establishes that the tangled library is token-identical to c/, so a
  * second run of these vectors against it would test the same object twice. */
+
+/* strtok_r is POSIX, not C99. Under a strict -std=c99 glibc hides its
+ * declaration, which turns the call below into an implicit declaration and,
+ * with -Werror, a build failure on Linux (macOS declares it regardless).
+ * Ask for POSIX.1-2008 explicitly, before any header. */
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <string.h>
 

@@ -112,8 +112,8 @@ runner_for() {
          fi ;;
     sh)  command -v bash >/dev/null 2>&1 && printf 'bash %s' "$DRIVERS/driver.sh" ;;
     shz) command -v zsh  >/dev/null 2>&1 && printf 'zsh %s'  "$DRIVERS/driver.sh" ;;
-    lean) [ -x "$REPO/lean/.lake/build/bin/powdriver" ] &&
-            printf '%s' "$REPO/lean/.lake/build/bin/powdriver" ;;
+    lean) [ -x "$REPO/../_buildoutput/256-shavar/lean/bin/powdriver" ] &&
+            printf '%s' "$REPO/../_buildoutput/256-shavar/lean/bin/powdriver" ;;
   esac
 }
 

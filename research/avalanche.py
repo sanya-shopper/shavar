@@ -50,7 +50,7 @@ IMPLS = {
     "scm":  ["chibi-scheme", "scm/shavar.scm"],
     "js":   ["./js/shavar-cli.js"],
     "sh":   ["bash", "sh/shavar.sh"],
-    "lean": ["./lean/.lake/build/bin/shavar"],
+    "lean": ["../_buildoutput/256-shavar/lean/bin/shavar"],
 }
 
 

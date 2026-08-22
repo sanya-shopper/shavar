@@ -37,6 +37,12 @@ ROOT=$(dirname "$TESTS_DIR")
 LIB="$TESTS_DIR/lib"
 VECTORS="$TESTS_DIR/vectors"
 
+# Lean binaries land in the disposable build tree, not inside the repo:
+# lean/lakefile.toml sets buildDir = "../../_buildoutput/256-shavar/lean"
+# (CLAUDE.md T2/T4), so `lake build` puts the executables beside the
+# repository, under _buildoutput/.
+LEAN_BIN_DIR="$ROOT/../_buildoutput/256-shavar/lean/bin"
+
 # Everything transient goes under one work directory so a run leaves no litter
 # in the repository.  Override with SHAVAR_WORK to keep artefacts for inspection.
 WORK=${SHAVAR_WORK:-${TMPDIR:-/tmp}/shavar-tests.$$}
@@ -106,7 +112,7 @@ impl_desc() {
           fi ;;
     sh)   echo "$BASH_BIN $ROOT/sh/shavar.sh" ;;
     shz)  echo "$ZSH_BIN $ROOT/sh/shavar.sh (same source, zsh)" ;;
-    lean) echo "${SHAVAR_LEAN_BIN:-$ROOT/lean/.lake/build/bin/shavar}" ;;
+    lean) echo "${SHAVAR_LEAN_BIN:-$LEAN_BIN_DIR/shavar}" ;;
     *)    echo "unknown impl $1" ;;
   esac
 }
@@ -134,7 +140,7 @@ impl_argv() {
           fi ;;
     sh)   printf '%s\n' "$BASH_BIN" "$ROOT/sh/shavar.sh" ;;
     shz)  printf '%s\n' "$ZSH_BIN" "$ROOT/sh/shavar.sh" ;;
-    lean) printf '%s\n' "${SHAVAR_LEAN_BIN:-$ROOT/lean/.lake/build/bin/shavar}" ;;
+    lean) printf '%s\n' "${SHAVAR_LEAN_BIN:-$LEAN_BIN_DIR/shavar}" ;;
     *)    return 127 ;;
   esac
 }
@@ -359,16 +365,16 @@ find_lean_bin() {
   if [ -n "${SHAVAR_LEAN_BIN:-}" ] && [ -x "${SHAVAR_LEAN_BIN}" ]; then
     export SHAVAR_LEAN_BIN; return 0
   fi
-  if [ -x "$ROOT/lean/.lake/build/bin/shavar" ]; then
-    SHAVAR_LEAN_BIN=$ROOT/lean/.lake/build/bin/shavar
+  if [ -x "$LEAN_BIN_DIR/shavar" ]; then
+    SHAVAR_LEAN_BIN=$LEAN_BIN_DIR/shavar
     export SHAVAR_LEAN_BIN; return 0
   fi
   # Fallback: the executable name is not fixed by CLI.md, so accept any single
   # candidate that is not one of the known non-CLI helpers.
-  for cand in "$ROOT"/lean/.lake/build/bin/*; do
+  for cand in "$LEAN_BIN_DIR"/*; do
     [ -f "$cand" ] && [ -x "$cand" ] || continue
     case $cand in *.hash|*.trace|*.rsp|*.olean|*.c|*.o) continue ;; esac
-    case ${cand##*/} in powdriver) continue ;; esac
+    case ${cand##*/} in powdriver|roundsdriver|sha256sum) continue ;; esac
     SHAVAR_LEAN_BIN=$cand; export SHAVAR_LEAN_BIN; return 0
   done
   return 1

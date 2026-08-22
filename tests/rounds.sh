@@ -93,8 +93,8 @@ runner_for() {
          elif command -v node >/dev/null 2>&1; then printf 'node %s' "$DRIVERS/driver.js"; fi ;;
     sh)  command -v bash >/dev/null 2>&1 && printf 'bash %s' "$DRIVERS/driver.sh" ;;
     shz) command -v zsh  >/dev/null 2>&1 && printf 'zsh %s'  "$DRIVERS/driver.sh" ;;
-    lean) [ -x "$REPO/lean/.lake/build/bin/roundsdriver" ] &&
-            printf '%s' "$REPO/lean/.lake/build/bin/roundsdriver" ;;
+    lean) [ -x "$REPO/../_buildoutput/256-shavar/lean/bin/roundsdriver" ] &&
+            printf '%s' "$REPO/../_buildoutput/256-shavar/lean/bin/roundsdriver" ;;
   esac
 }
 

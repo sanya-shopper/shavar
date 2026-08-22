@@ -13,10 +13,15 @@ the `by …` parts — are for the machine; skipping them loses nothing.
 ```
 cd lean
 lake build                     # compiles the library, the proofs, and the tests
-.lake/build/bin/shavar hash - 0
-.lake/build/bin/shavar selftest
-.lake/build/bin/sha256sum lakefile.toml   # shasum-style file hashing
+../../_buildoutput/256-shavar/lean/bin/shavar hash - 0
+../../_buildoutput/256-shavar/lean/bin/shavar selftest
+../../_buildoutput/256-shavar/lean/bin/sha256sum lakefile.toml   # shasum-style file hashing
 ```
+
+The executables land beside the repository, not under `lean/.lake`:
+`lakefile.toml` sets `buildDir` to the disposable tree
+`../../_buildoutput/256-shavar/lean`, which is safe to delete wholesale
+and is recreated by the next `lake build`.
 
 Requires Lean 4.32.2 (pinned in `lean-toolchain`; `elan` will fetch it). There
 are **no external dependencies** — no Mathlib. Everything uses Lean's core

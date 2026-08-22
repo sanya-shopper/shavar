@@ -23,7 +23,9 @@
 set -u
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-BIN=$REPO/lean/.lake/build/bin/sha256sum
+# lean/lakefile.toml sends build output to the disposable tree beside the
+# repo (CLAUDE.md T2/T4), so the binary is not under lean/.lake.
+BIN=$REPO/../_buildoutput/256-shavar/lean/bin/sha256sum
 
 say() { printf '%s\n' "$*"; }
 FAILURES=0

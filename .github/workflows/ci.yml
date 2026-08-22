@@ -251,7 +251,7 @@ jobs:
         with:
           path: |
             ~/.elan
-            lean/.lake
+            ../_buildoutput/256-shavar/lean
           key: lean-${{ runner.os }}-${{ hashFiles('lean/lean-toolchain', 'lean/lakefile.toml') }}
       - name: Build
         working-directory: lean

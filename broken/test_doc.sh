@@ -9,8 +9,8 @@
 # arrived on the page.
 #
 # It also checks the project's reference convention: every local copy that
-# refs.bib promises must exist in refs/, and every entry that says it has no
-# local copy must be telling the truth.
+# refs.bib promises must exist in the sibling ../_refs/256-shavar/ tree, and
+# every entry that says it has no local copy must be telling the truth.
 set -u
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -100,14 +100,21 @@ nbox=$(grep -c "Overfull\|Underfull" sha-broken.log 2>/dev/null)
                   || fail "no overfull or underfull boxes ($nbox found)"
 
 # ---- 5. the reference convention -----------------------------------------
-# Every \path{refs/...} promised by refs.bib must exist.
-missing=0
-for f in $(grep -o 'refs/[a-zA-Z0-9._-]*\.pdf' refs.bib | sort -u); do
-  if [ -f "$REPO/$f" ]; then :; else
-    fail "refs.bib promises $f but it is missing"; missing=1
-  fi
-done
-[ "$missing" = 0 ] && pass "every local copy promised by refs.bib exists"
+# Every \path{../_refs/256-shavar/...} promised by refs.bib must exist. The
+# paths in the bib are written relative to the repo root, so the tree is at
+# $REPO/../_refs. On a bare checkout (CI) it does not exist at all; that is
+# a skip, not a pass.
+if [ -d "$REPO/../_refs" ]; then
+  missing=0
+  for f in $(grep -o '_refs/[a-zA-Z0-9._-]*/[a-zA-Z0-9._-]*\.pdf' refs.bib | sort -u); do
+    if [ -f "$REPO/../$f" ]; then :; else
+      fail "refs.bib promises $f but it is missing"; missing=1
+    fi
+  done
+  [ "$missing" = 0 ] && pass "every local copy promised by refs.bib exists"
+else
+  note "local copies promised by refs.bib" "skipped (no _refs tree)"
+fi
 
 # Entries that claim to have no local copy must not secretly have one.
 if grep -q "No local copy" refs.bib; then

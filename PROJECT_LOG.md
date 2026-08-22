@@ -541,6 +541,8 @@ constraints, and what a finished version looks like — written before code, so
 that later entries can be read against the original intent rather than against
 a reconstruction of it.
 
-2026-08-12: reference PDFs relocated to the sibling `../refs/256-shavar/`
+2026-08-12: reference PDFs relocated to the sibling `../_refs/256-shavar/`
 tree (local use only, per the updated projects-wide B-rules); bib
-paths updated and refs/ purged from git history.
+paths updated and refs/ purged from git history. (The sibling tree has
+since gained its underscore prefix — `_refs/` — and the paths here and
+in the two `refs.bib` files were updated to follow.)

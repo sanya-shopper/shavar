@@ -68,10 +68,17 @@ if command -v pdftotext >/dev/null; then
 fi
 
 # ---- 6. every local copy promised by the bibliography exists --------------
-# refs.bib claims specific files in refs/. A claim like that rots silently.
-while read -r p; do
-  if [ -f "../$p" ]; then pass "local copy present: $p"; else fail "local copy present: $p"; fi
-done < <(grep -oE 'refs/[A-Za-z0-9._-]+\.pdf' refs.bib | sort -u)
+# refs.bib claims specific files in ../_refs/256-shavar/ (paths written
+# relative to the repo root, so ../../_refs from this directory). A claim
+# like that rots silently. On a bare checkout (CI) the sibling tree does not
+# exist at all; that is a skip, not a pass.
+if [ -d ../../_refs ]; then
+  while read -r p; do
+    if [ -f "../../$p" ]; then pass "local copy present: $p"; else fail "local copy present: $p"; fi
+  done < <(grep -oE '_refs/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.pdf' refs.bib | sort -u)
+else
+  note "local copies promised by refs.bib" "skipped (no ../../_refs tree)"
+fi
 
 # ---- 7. internal links exist ----------------------------------------------
 # hyperref emits /Annots for links; a document with none means colorlinks

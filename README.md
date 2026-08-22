@@ -95,7 +95,7 @@ orders, and `lean/Shavar/Pow.lean` proves it.
 
 ## Correctness
 
-Verified in CI on every push (45 jobs):
+Verified in CI on every push (47 jobs):
 
 - **1154 NIST CAVP vectors, 896 of them not byte-aligned.** Committed, so the
   suite runs offline.

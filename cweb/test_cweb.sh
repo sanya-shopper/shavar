@@ -31,6 +31,11 @@ cd "$(dirname "$0")" || exit 1
 HERE=$(pwd)
 ROOT=$(dirname "$HERE")
 
+# Compiled build output lives in the disposable tree beside the repository
+# (CLAUDE.md T2); BUILD_TARGET_PREFIX overrides the prefix, matching c/Makefile
+# and tests/lib/common.sh.
+BUILD_DIR=${BUILD_TARGET_PREFIX:-$(dirname "$ROOT")}/_buildoutput/256-shavar
+
 QUICK=0
 [ "${1:-}" = "--quick" ] && QUICK=1
 
@@ -162,7 +167,7 @@ fi
 
 # ---- leg 2: observational identity ----------------------------------------
 
-REF="$ROOT/c/shavar"
+REF="$BUILD_DIR/c/shavar"
 if [ ! -x "$REF" ]; then
   ( cd "$ROOT/c" && make shavar ) > "$TMP/refbuild.log" 2>&1
 fi

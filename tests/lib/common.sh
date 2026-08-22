@@ -37,11 +37,13 @@ ROOT=$(dirname "$TESTS_DIR")
 LIB="$TESTS_DIR/lib"
 VECTORS="$TESTS_DIR/vectors"
 
-# Lean binaries land in the disposable build tree, not inside the repo:
-# lean/lakefile.toml sets buildDir = "../../_buildoutput/256-shavar/lean"
-# (CLAUDE.md T2/T4), so `lake build` puts the executables beside the
-# repository, under _buildoutput/.
-LEAN_BIN_DIR="$ROOT/../_buildoutput/256-shavar/lean/bin"
+# Build output lands in the disposable tree beside the repository, never
+# inside it (CLAUDE.md T2/T4): lean/lakefile.toml sets its buildDir there and
+# c/Makefile derives the same prefix.  BUILD_TARGET_PREFIX overrides the
+# prefix, matching the Makefiles.
+BUILD_PREFIX=${BUILD_TARGET_PREFIX:-$(dirname "$ROOT")}
+BUILD_DIR="$BUILD_PREFIX/_buildoutput/256-shavar"
+LEAN_BIN_DIR="$BUILD_DIR/lean/bin"
 
 # Everything transient goes under one work directory so a run leaves no litter
 # in the repository.  Override with SHAVAR_WORK to keep artefacts for inspection.
@@ -62,14 +64,14 @@ BASH_BIN=${SHAVAR_BASH:-bash}
 ZSH_BIN=${SHAVAR_ZSH:-zsh}
 CC_BIN=${SHAVAR_CC:-clang}
 
-# Which build of the C implementation to test.  Normally the binary the
-# Makefile produces in c/.  SHAVAR_C_BIN points the harness at a different
+# Which build of the C implementation to test.  Normally the binary the c/
+# Makefile produces under $BUILD_DIR.  SHAVAR_C_BIN points the harness at a different
 # build of the same program without changing anything else: cweb/test_cweb.sh
 # sets it to the binary produced by `ctangle`-ing cweb/shavar-cweb.w, so the
 # literate version is checked by this suite rather than by a parallel one.
 # When it is set the C build step is skipped, since the caller supplied the
 # binary.
-C_BIN=${SHAVAR_C_BIN:-$ROOT/c/shavar}
+C_BIN=${SHAVAR_C_BIN:-$BUILD_DIR/c/shavar}
 
 # The full roster, in report order.  Missing ones are reported as skipped.
 ALL_IMPLS="c py pl scm js sh shz lean"
@@ -331,8 +333,9 @@ discover_impls() {
   done
 }
 
-# build_c — build the C implementation into $ROOT/c/shavar.  Uses the repo's
-# Makefile when there is one, otherwise the documented clang line.
+# build_c — build the C implementation into $BUILD_DIR/c/shavar (where the c/
+# Makefile puts it).  Uses the repo's Makefile when there is one, otherwise
+# the documented clang line aimed at the same place.
 build_c() {
   # A caller-supplied binary is used as it is; building over it would defeat
   # the point of pointing the harness somewhere else.
@@ -342,10 +345,11 @@ build_c() {
     return 1
   fi
   if [ -f "$ROOT/c/Makefile" ]; then
-    ( cd "$ROOT/c" && make ) >"$WORK/build-c.log" 2>&1 && [ -x "$ROOT/c/shavar" ] && return 0
+    ( cd "$ROOT/c" && make ) >"$WORK/build-c.log" 2>&1 && [ -x "$C_BIN" ] && return 0
   fi
-  ( cd "$ROOT/c" && "$CC_BIN" -std=c99 -O2 shavar.c main.c -o shavar ) >>"$WORK/build-c.log" 2>&1
-  [ -x "$ROOT/c/shavar" ]
+  mkdir -p "$BUILD_DIR/c"
+  ( cd "$ROOT/c" && "$CC_BIN" -std=c99 -O2 shavar.c main.c -o "$BUILD_DIR/c/shavar" ) >>"$WORK/build-c.log" 2>&1
+  [ -x "$C_BIN" ]
 }
 
 # find_lean_bin — locate the `lake exe` that speaks the CLI.md contract.

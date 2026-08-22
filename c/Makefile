@@ -32,6 +32,13 @@
 #   stds/opts  4 language standards x 6 optimisation levels, all agreeing.
 #   arch       x86_64 cross-build for a second code generator.
 
+# Build output goes to the disposable tree (CLAUDE.md T2/T4), never in-tree.
+# The default prefix is the directory the repo sits in — derived, not
+# hardcoded, so the same Makefile works on a CI checkout — matching
+# broken/Makefile and the buildDir in lean/lakefile.toml.
+BUILD_TARGET_PREFIX ?= $(abspath ../..)
+OUT      = $(BUILD_TARGET_PREFIX)/_buildoutput/256-shavar/c
+
 CC      ?= cc
 STD     ?= c99
 OPT     ?= -O2
@@ -41,7 +48,7 @@ WARN     = -Wall -Wextra -pedantic-errors -Wshadow -Wconversion -Wsign-conversio
 CFLAGS  ?= -std=$(STD) $(OPT) $(WARN)
 
 LIBSRC   = shavar.c
-LIBOBJ   = shavar.o
+LIBOBJ   = $(OUT)/shavar.o
 CLISRC   = main.c
 
 # macOS names shared libraries .dylib. A .so is also produced because the
@@ -52,49 +59,60 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 SHLIB    = libshavar.dylib
 SHFLAGS  = -dynamiclib -install_name @rpath/libshavar.dylib
+RPATH    = -Wl,-rpath,@loader_path
 else
 SHLIB    = libshavar.so
 SHFLAGS  = -shared
+RPATH    = -Wl,-rpath,'$$ORIGIN'
 endif
 
-.PHONY: all check help clean stds opts san ubsan asan asan-deep analyze arch leaks bigmatrix
+.PHONY: all check help clean stds opts san ubsan asan asan-deep analyze arch leaks bigmatrix shavar shavar-shared out
 
-all: libshavar.a $(SHLIB) libshavar.so shavar
+all: $(OUT)/libshavar.a $(OUT)/$(SHLIB) $(OUT)/libshavar.so $(OUT)/shavar
+
+# Convenience aliases, so `make shavar` keeps meaning what it used to.
+shavar: $(OUT)/shavar
+shavar-shared: $(OUT)/shavar-shared
+
+# Where the products go, for shell callers:  OUT=$$(make -s -C c out)
+out:
+	@echo $(OUT)
 
 # ---- libraries -------------------------------------------------------
 
 # Position-independent code so the same object can serve both archives and
 # the shared library without a second compile.
 $(LIBOBJ): $(LIBSRC) shavar.h
+	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) -fPIC -c $(LIBSRC) -o $@
 
-libshavar.a: $(LIBOBJ)
+$(OUT)/libshavar.a: $(LIBOBJ)
 	ar rcs $@ $^
 	@echo "  static archive:  $@"
 
-$(SHLIB): $(LIBOBJ)
+$(OUT)/$(SHLIB): $(LIBOBJ)
 	$(CC) $(SHFLAGS) $(LIBOBJ) -o $@
 	@echo "  shared library:  $@"
 
-libshavar.so: $(LIBOBJ)
+$(OUT)/libshavar.so: $(LIBOBJ)
 	$(CC) -shared $(LIBOBJ) -o $@
 	@echo "  shared library:  $@"
 
 # ---- executables -----------------------------------------------------
 
 # Linked against the static archive.
-shavar: $(CLISRC) libshavar.a shavar.h
-	$(CC) $(CFLAGS) $(CLISRC) libshavar.a -o $@
+$(OUT)/shavar: $(CLISRC) $(OUT)/libshavar.a shavar.h
+	$(CC) $(CFLAGS) $(CLISRC) $(OUT)/libshavar.a -o $@
 
 # Linked against the shared library, to prove the .dylib actually resolves.
-shavar-shared: $(CLISRC) $(SHLIB) shavar.h
-	$(CC) $(CFLAGS) $(CLISRC) -L. -lshavar -Wl,-rpath,@loader_path -o $@
+$(OUT)/shavar-shared: $(CLISRC) $(OUT)/$(SHLIB) shavar.h
+	$(CC) $(CFLAGS) $(CLISRC) -L$(OUT) -lshavar $(RPATH) -o $@
 
 # ---- checks ----------------------------------------------------------
 
-check: shavar shavar-shared
-	@echo "== static-linked =="; ./shavar selftest
-	@echo "== shared-linked =="; ./shavar-shared selftest
+check: $(OUT)/shavar $(OUT)/shavar-shared
+	@echo "== static-linked =="; $(OUT)/shavar selftest
+	@echo "== shared-linked =="; $(OUT)/shavar-shared selftest
 
 # Every language standard clang supports, at -O2. Catches constructs that
 # happen to compile under one standard's rules and not another's.
@@ -196,4 +214,5 @@ help:
 	@echo "targets: all check stds opts asan asan-deep ubsan san analyze arch leaks bigmatrix clean"
 
 clean:
-	rm -f *.o *.a *.dylib *.so shavar shavar-shared *.plist
+	rm -f $(OUT)/*.o $(OUT)/*.a $(OUT)/*.dylib $(OUT)/*.so \
+	      $(OUT)/shavar $(OUT)/shavar-shared *.plist

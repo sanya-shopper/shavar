@@ -39,18 +39,25 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Compiled implementations live in the disposable build tree beside the
+# repository (CLAUDE.md T2), never in-tree. BUILD_TARGET_PREFIX overrides the
+# prefix, matching c/Makefile and tests/lib/common.sh.
+BUILD_DIR = os.path.join(
+    os.environ.get("BUILD_TARGET_PREFIX", os.path.dirname(REPO)),
+    "_buildoutput", "256-shavar")
+
 JSC = ("/System/Library/Frameworks/JavaScriptCore.framework"
        "/Versions/A/Helpers/jsc")
 
 # How to invoke each implementation. Same table as the test harness uses.
 IMPLS = {
-    "c":    ["./c/shavar"],
+    "c":    [os.path.join(BUILD_DIR, "c", "shavar")],
     "py":   ["python3", "py/shavar.py"],
     "pl":   ["perl", "pl/shavar.pl"],
     "scm":  ["chibi-scheme", "scm/shavar.scm"],
     "js":   ["./js/shavar-cli.js"],
     "sh":   ["bash", "sh/shavar.sh"],
-    "lean": ["../_buildoutput/256-shavar/lean/bin/shavar"],
+    "lean": [os.path.join(BUILD_DIR, "lean", "bin", "shavar")],
 }
 
 

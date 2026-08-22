@@ -32,7 +32,8 @@ subsumes the others:
    *identical* — currently 3821 tokens for the library and 11778 for the driver.
    This catches drift in code that no test happens to execute. It would pass if
    both programs were identically wrong.
-2. **Observational identity.** The tangled binary and `c/shavar` must agree on
+2. **Observational identity.** The tangled binary and the binary built from
+   `c/` must agree on
    digests over 217 messages (189 of them not byte-aligned), on **full
    per-round traces** record for record, on reduced-round output at ten round
    counts including 0 and 64, and on the exit status, stdout and stderr of

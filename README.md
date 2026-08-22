@@ -26,9 +26,10 @@ the formal statement of "the register shuffle was never computation".
 
 ```sh
 make -C c                                  # build the reference
-./c/shavar hash 616263 24                  # "abc"
-./c/shavar hash b0 5                       # a FIVE-BIT message
-./c/shavar trace 616263 24 | head          # every intermediate value
+bin=../_buildoutput/256-shavar/c           # where the build lands (never in-tree)
+$bin/shavar hash 616263 24                 # "abc"
+$bin/shavar hash b0 5                      # a FIVE-BIT message
+$bin/shavar trace 616263 24 | head         # every intermediate value
 
 open js/index.html                         # the interactive step-debugger
 bash tests/run.sh fast                     # cross-check all implementations

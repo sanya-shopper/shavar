@@ -146,16 +146,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build .a and .so and link against both
         working-directory: c
+        # The Makefile puts its products in the disposable tree beside the
+        # checkout (CLAUDE.md T2); `make -s out` reports where.
         run: |
-          make libshavar.a libshavar.so
-          ls -l libshavar.a libshavar.so
+          make
+          OUT=$(make -s out)
+          ls -l "$OUT"/libshavar.a "$OUT"/libshavar.so
           # Prove the shared object actually resolves at runtime, which a
           # plain build does not demonstrate.
-          cc -std=c99 -O2 main.c -L. -lshavar -Wl,-rpath,'$ORIGIN' -o shavar-shared
-          ./shavar-shared selftest
-          cc -std=c99 -O2 main.c libshavar.a -o shavar-static
-          ./shavar-static selftest
-          nm -D libshavar.so | grep -c ' T shavar_' || true
+          cc -std=c99 -O2 main.c -L"$OUT" -lshavar -Wl,-rpath,'$ORIGIN' -o "$OUT"/shavar-shared
+          "$OUT"/shavar-shared selftest
+          cc -std=c99 -O2 main.c "$OUT"/libshavar.a -o "$OUT"/shavar-static
+          "$OUT"/shavar-static selftest
+          nm -D "$OUT"/libshavar.so | grep -c ' T shavar_' || true
 
   # ------------------------------------------------- other implementations
   implementations:
